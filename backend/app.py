@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 import spherex as sx
 
-app = FastAPI(title="SPHEREx Explorer API", version="1.0")
+app = FastAPI(title="ASPAN EON API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 

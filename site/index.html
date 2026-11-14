@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPHEREx Explorer</title>
-<meta name="description" content="Type a position on the sky and play every NASA SPHEREx infrared image of it in time order. Things that move or change brightness stand out.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect x=%223%22 y=%226%22 width=%2226%22 height=%2220%22 rx=%222%22 fill=%22%23E3EAEC%22/%3E%3Ccircle cx=%2213%22 cy=%2216%22 r=%222.4%22 fill=%22%2310171A%22/%3E%3Ccircle cx=%2221%22 cy=%2212%22 r=%221.4%22 fill=%22%23E5A03A%22/%3E%3C/svg%3E">
+<title>ASPAN EON</title>
+<meta name="description" content="ASPAN EON: type a position on the sky and play every NASA SPHEREx infrared image of it in time order. Things that move or change brightness stand out.">
+<link rel="icon" type="image/png" href="img/aspan-eon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=20261114c">
+<link rel="stylesheet" href="css/app.css?v=20261114-aspan-eon">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="./" aria-label="SPHEREx Explorer, start page">
-    <svg viewBox="0 0 32 32" class="logo" aria-hidden="true"><rect x="3" y="6" width="26" height="20" rx="2" fill="#E3EAEC"/><circle cx="13" cy="16" r="2.4" fill="#10171A"/><circle cx="21" cy="12" r="1.4" fill="#E5A03A"/></svg>
-    <span class="brand-name">SPHEREx Explorer</span>
+  <a class="brand" href="./" aria-label="ASPAN EON, start page">
+    <img class="logo" src="img/aspan-eon.png" alt="" width="693" height="397">
+    <span class="brand-name">ASPAN EON</span>
   </a>
   <form id="searchForm" class="search" role="search">
     <label for="coordInput" class="sr-only">Sky position or object name</label>
@@ -248,7 +248,7 @@
 <div class="modal hidden" id="modal-about" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
   <div class="modal-box prose">
     <button class="modal-close" data-close aria-label="Close">×</button>
-    <h2 id="aboutTitle">About</h2>
+    <h2 id="aboutTitle">About ASPAN EON</h2>
     <p>Made for the 2026 NASA Space Apps Challenge, challenge “Planet X and SPHEREx”, by team <span id="teamName">The K' Oirat</span> from Astana, Kazakhstan.</p>
     <p>Images: SPHEREx Quick Release spectral images from the NASA/IPAC Infrared Science Archive (IRSA). If you use images from this tool, cite the SPHEREx data release DOIs listed by IRSA. Star catalogues: ESA Gaia DR3 and NASA AllWISE through CDS VizieR. Sky atlas: Aladin Lite by CDS, Strasbourg.</p>
     <p>To link to a position, add <code>?ra=…&amp;dec=…</code> to the address, or use Share.</p>
@@ -285,8 +285,8 @@
 </div>
 <div class="toast hidden" id="toast" role="status"></div>
 
-<script src="js/config.js?v=20261114c"></script>
-<script src="js/app.js?v=20261114c"></script>
-<script src="js/guide.js?v=20261114c"></script>
+<script src="js/config.js?v=20261114-aspan-eon"></script>
+<script src="js/app.js?v=20261114-aspan-eon"></script>
+<script src="js/guide.js?v=20261114-aspan-eon"></script>
 </body>
 </html>

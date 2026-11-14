@@ -1,4 +1,6 @@
-# SPHEREx Explorer
+# ASPAN EON
+
+<img src="site/img/aspan-eon.png" alt="ASPAN EON logo" width="240">
 
 NASA Space Apps Challenge 2026, challenge "Planet X and SPHEREx". Team The K' Oirat, Astana.
 

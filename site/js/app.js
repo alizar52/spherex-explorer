@@ -840,7 +840,7 @@ function onData(data, opts = {}) {
   if ($('showGaia').checked) loadCatalog('gaia');
   if ($('showWise').checked) loadCatalog('allwise');
   const t = data.target;
-  document.title = `${t.name ? t.name + ', ' : ''}SPHEREx Explorer`;
+  document.title = `${t.name ? t.name + ', ' : ''}ASPAN EON`;
   markCurrentObject();
   updateURL();
 }
@@ -1048,7 +1048,7 @@ function wire() {
   $('shareBtn').addEventListener('click', () => {
     updateURL(); const url = location.href.replace(/&?embed=1/, '');
     $('shareLink').value = url;
-    $('embedCode').value = `<iframe src="${url}${url.includes('?') ? '&' : '?'}embed=1" width="640" height="560" style="border:0" title="SPHEREx Explorer"></iframe>`;
+    $('embedCode').value = `<iframe src="${url}${url.includes('?') ? '&' : '?'}embed=1" width="640" height="560" style="border:0" title="ASPAN EON"></iframe>`;
     openModal('share');
   });
   document.addEventListener('keydown', (e) => {

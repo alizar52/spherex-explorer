@@ -14,7 +14,7 @@ const KIND_EXPLAIN = {
   moving: 'Something that is not in the usual sky and appears at several places along a straight line, in date order. Asteroids and comets look like this.',
   shifted: 'A star whose centre drifts steadily from date to date. Nearby stars and brown dwarfs do this because they move through space (proper motion) and because Earth moves around the Sun (parallax).',
   variable: 'A star that is clearly brighter in some frames than in others taken at almost the same wavelength, compared with its neighbours. Variable stars, flares and eclipses do this.',
-  transient: 'A bright spot in one frame only. Usually a cosmic-ray hit that the quality flags missed, but worth a look.',
+  transient: 'A bright spot in one exposure only. Both halves of the camera saw it at the same moment, so it is not a cosmic-ray hit. It may be a satellite glint or a fast object.',
 };
 
 const S = {
@@ -30,6 +30,15 @@ function b64ToTyped(b64, Ctor) {
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   return new Ctor(buf.buffer);
+}
+function b64ToF16(b64) {
+  const h = b64ToTyped(b64, Uint16Array);
+  const out = new Float32Array(h.length);
+  for (let i = 0; i < h.length; i++) {
+    const v = h[i], s = v & 0x8000 ? -1 : 1, e = (v >> 10) & 31, m = v & 1023;
+    out[i] = e === 0 ? s * m * 5.960464477539063e-8 : e === 31 ? (m ? NaN : s * Infinity) : s * (1 + m / 1024) * 2 ** (e - 15);
+  }
+  return out;
 }
 function toast(msg, ms = 2600) {
   const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
@@ -111,6 +120,7 @@ function targetXY(fr) {
 }
 
 const CMAPS = {
+  magma: [[0, 0, 4], [28, 16, 68], [79, 18, 123], [129, 37, 129], [181, 54, 122], [229, 80, 100], [251, 135, 97], [254, 194, 135], [252, 253, 191]],
   plate: [[227, 234, 236], [190, 201, 205], [120, 134, 140], [52, 63, 68], [16, 23, 26]],
   gray: [[0, 0, 0], [255, 255, 255]],
   inferno: [[0, 0, 4], [31, 12, 72], [85, 15, 109], [136, 34, 106], [186, 54, 85], [227, 89, 51], [249, 140, 10], [249, 201, 50], [252, 255, 164]],
@@ -137,10 +147,11 @@ function drawColorbar() {
 function frameArr(fr, key) {
   const cacheKey = '_' + key;
   if (fr[cacheKey]) return fr[cacheKey];
-  if (key === 'img') fr[cacheKey] = b64ToTyped(fr.image, Float32Array);
+  const flt = b => (fr.dtype === 'f2' ? b64ToF16(b) : b64ToTyped(b, Float32Array));
+  if (key === 'img') fr[cacheKey] = flt(fr.image);
   else if (key === 'bad') fr[cacheKey] = b64ToTyped(fr.bad, Uint8Array);
-  else if (key === 'zodi') fr[cacheKey] = fr.zodi ? b64ToTyped(fr.zodi, Float32Array) : null;
-  else if (key === 'noise') fr[cacheKey] = fr.noise ? b64ToTyped(fr.noise, Float32Array) : null;
+  else if (key === 'zodi') fr[cacheKey] = fr.zodi ? flt(fr.zodi) : null;
+  else if (key === 'noise') fr[cacheKey] = fr.noise ? flt(fr.noise) : null;
   return fr[cacheKey];
 }
 function smooth(arr, n) {
@@ -294,10 +305,17 @@ function draw() {
   $('stageMsg').textContent = '';
   const n = S.data.size; const gap = 12 * dpr;
   const twoUp = S.mode === 'side';
-  const fit = twoUp ? Math.min((W - gap * 3) / 2, H - gap * 2) / n : Math.min(W - gap * 2, H - gap * 2) / n;
+  const fitIn = (h) => (twoUp ? Math.min((W - gap * 3) / 2, h - gap * 2) : Math.min(W - gap * 2, h - gap * 2)) / n;
+  let fit = fitIn(H), top = 0;
+  const lab = $('frameLabel');
+  if (lab.textContent) {
+    const lw = (lab.offsetLeft + lab.offsetWidth + 8) * dpr, lh = (lab.offsetTop + lab.offsetHeight + 4) * dpr;
+    const imgW = (twoUp ? 2 * n * fit + gap : n * fit) * S.zoom;
+    if ((W - imgW) / 2 < lw && (H - n * fit * S.zoom) / 2 < lh) { top = lh; fit = fitIn(H - top); }
+  }
   const s = fit * S.zoom;
   sctx.imageSmoothingEnabled = false;
-  const cx = W / 2 + S.panX * dpr, cy = H / 2 + S.panY * dpr;
+  const cx = W / 2 + S.panX * dpr, cy = top + (H - top) / 2 + S.panY * dpr;
   let label = '';
 
   const put = (cv, ox, oy, fr, tag, clipRect) => {
@@ -368,16 +386,31 @@ function onLight() {
   return $('cmapSelect').value === 'plate' || S.mode === 'diff' ||
     (S.mode === 'stack' && document.querySelector('input[name=stackKind]:checked').value === 'resid');
 }
+function halo(ctx, L, width, path) {
+  ctx.save(); ctx.strokeStyle = L ? 'rgba(255,255,255,.75)' : 'rgba(8,10,14,.7)'; ctx.lineWidth = width;
+  ctx.setLineDash([]); path(); ctx.stroke(); ctx.restore();
+}
+function tag(ctx, L, txt, x, y, col, dpr) {
+  const w = ctx.measureText(txt).width, h = 16 * dpr, pad = 4 * dpr;
+  ctx.save(); ctx.fillStyle = L ? 'rgba(244,247,248,.88)' : 'rgba(12,15,19,.78)';
+  ctx.fillRect(x - pad, y - h + 4 * dpr, w + 2 * pad, h);
+  ctx.fillStyle = col; ctx.fillText(txt, x, y); ctx.restore();
+  return {x: x - pad, y: y - h + 4 * dpr, w: w + 2 * pad, h};
+}
+const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
 function drawOverlays(p) {
   const L = onLight(); const KC = L ? KIND_INK : KIND_COLOR; const FONT = 'Archivo, Arial, sans-serif';
   const n = S.data.size; const dpr = window.devicePixelRatio || 1; const ctx = sctx;
+  const taken = [];
   ctx.save();
   ctx.beginPath(); ctx.rect(p.x, p.y, n * p.s, n * p.s); ctx.clip();
   if ($('showCross').checked) {
     const tq = targetXY(p.frame); const [x, y] = toScreen(p, tq.x, tq.y); const r = 9 * dpr, g = 4 * dpr;
-    ctx.strokeStyle = L ? 'rgba(15,110,153,.9)' : 'rgba(92,179,214,.9)'; ctx.lineWidth = 1.4 * dpr; ctx.beginPath();
-    ctx.moveTo(x - r - g, y); ctx.lineTo(x - g, y); ctx.moveTo(x + g, y); ctx.lineTo(x + r + g, y);
-    ctx.moveTo(x, y - r - g); ctx.lineTo(x, y - g); ctx.moveTo(x, y + g); ctx.lineTo(x, y + r + g); ctx.stroke();
+    const cross = () => { ctx.beginPath(); ctx.moveTo(x - r - g, y); ctx.lineTo(x - g, y); ctx.moveTo(x + g, y); ctx.lineTo(x + r + g, y);
+      ctx.moveTo(x, y - r - g); ctx.lineTo(x, y - g); ctx.moveTo(x, y + g); ctx.lineTo(x, y + r + g); };
+    halo(ctx, L, 4 * dpr, cross);
+    ctx.strokeStyle = L ? 'rgba(15,110,153,.95)' : 'rgba(120,205,240,.95)'; ctx.lineWidth = 1.6 * dpr; cross(); ctx.stroke();
   }
   const cats = [['gaia', $('showGaia').checked, L ? '#0F6E99' : '#5CB3D6'], ['allwise', $('showWise').checked, L ? '#B86E00' : '#E5A03A']];
   for (const [k, on, col] of cats) {
@@ -405,7 +438,7 @@ function drawOverlays(p) {
         d.track.forEach((t, i) => { const [x, y] = toScreen(p, t.x, t.y); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
         ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
         for (const t of d.track) { const [x, y] = toScreen(p, t.x, t.y); ctx.beginPath(); ctx.arc(x, y, 2 * dpr, 0, 7); ctx.fill(); }
-        if (here) { const [x, y] = toScreen(p, here.x, here.y); ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke(); }
+        if (here) { const [x, y] = toScreen(p, here.x, here.y); halo(ctx, L, ctx.lineWidth + 3 * dpr, () => { ctx.beginPath(); ctx.arc(x, y, R, 0, 7); }); ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke(); }
       } else if (d.kind === 'shifted') {
         const a = d.track[0], b = d.track[d.track.length - 1];
         const [x1, y1] = toScreen(p, a.x, a.y), [x2, y2] = toScreen(p, b.x, b.y);
@@ -414,28 +447,44 @@ function drawOverlays(p) {
         ctx.lineTo(x2 - 6 * dpr * Math.cos(ang - 0.5), y2 - 6 * dpr * Math.sin(ang - 0.5));
         ctx.lineTo(x2 - 6 * dpr * Math.cos(ang + 0.5), y2 - 6 * dpr * Math.sin(ang + 0.5)); ctx.closePath(); ctx.fill();
         const c = here || {x: d.x, y: d.y}; const [x, y] = toScreen(p, c.x, c.y);
+        halo(ctx, L, ctx.lineWidth + 3 * dpr, () => { ctx.beginPath(); ctx.arc(x, y, R, 0, 7); });
         ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke();
       } else {
         const c = here || {x: d.x, y: d.y}; const [x, y] = toScreen(p, c.x, c.y);
+        if (d.kind !== 'transient' || here) halo(ctx, L, ctx.lineWidth + 3 * dpr, () => { ctx.beginPath(); ctx.arc(x, y, R, 0, 7); });
         if (d.kind === 'transient') { ctx.setLineDash([3 * dpr, 3 * dpr]); ctx.globalAlpha = here ? 1 : 0.35; }
         ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
       const c0 = here || d.track[0] || d; const [lx, ly] = toScreen(p, c0.x, c0.y);
       if (sel || d.name) {
         ctx.font = `600 ${12 * dpr}px ${FONT}`; const txt = d.name || KIND_LABEL[d.kind]; const tw = ctx.measureText(txt).width;
-        const right = p.x + n * p.s; const tx = lx + R + 4 * dpr + tw > right - 4 * dpr ? lx - R - 4 * dpr - tw : lx + R + 4 * dpr;
-        ctx.fillText(txt, tx, ly - R + 6 * dpr);
+        const left = p.x + 6 * dpr, right = p.x + n * p.s - 6 * dpr, top = p.y + 22 * dpr, bottom = p.y + n * p.s - 30 * dpr;
+        const gap = R + 6 * dpr, h = 16 * dpr;
+        const spots = [[lx + gap, ly - R + 8 * dpr], [lx - gap - tw, ly - R + 8 * dpr], [lx - tw / 2, ly - gap - 2 * dpr], [lx - tw / 2, ly + gap + h - 2 * dpr]];
+        let best = null;
+        for (const [tx, ty] of spots) {
+          const box = {x: tx - 4 * dpr, y: ty - h + 4 * dpr, w: tw + 8 * dpr, h};
+          if (tx < left || tx + tw > right || ty - h < top || ty > bottom || taken.some((b) => hit(b, box))) continue;
+          best = [tx, ty]; break;
+        }
+        if (!best) best = [clamp(lx + gap, left, right - tw), clamp(ly - R + 8 * dpr, top + h, bottom)];
+        taken.push(tag(ctx, L, txt, best[0], best[1], col, dpr));
       }
     }
   }
   ctx.restore();
   const w = n * p.s; const bx = p.x + 10 * dpr, by = p.y + w - 12 * dpr; const bar = 60 / PIX_ARCSEC * p.s;
-  const ink = L ? '#10171A' : '#DCE2E4'; ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 1.5 * dpr; ctx.font = `${11 * dpr}px ${FONT}`;
-  if (bar < w * 0.6) { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bar, by); ctx.stroke(); ctx.fillText('1′', bx + bar / 2 - 4 * dpr, by - 5 * dpr); }
+  const ink = L ? '#10171A' : '#EEF2F3'; ctx.font = `600 ${11 * dpr}px ${FONT}`; ctx.lineWidth = 1.5 * dpr;
   const ex = p.x + w - 16 * dpr, ey = p.y + w - 16 * dpr, a = 20 * dpr;
-  ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex, ey - a); ctx.moveTo(ex, ey); ctx.lineTo(ex - a, ey); ctx.stroke();
-  ctx.fillText('N', ex - 3 * dpr, ey - a - 3 * dpr); ctx.fillText('E', ex - a - 10 * dpr, ey + 4 * dpr);
-  if (p.tag && ['side', 'swipe', 'blink'].includes(S.mode)) { ctx.font = `700 ${13 * dpr}px ${FONT}`; ctx.fillStyle = L ? '#B86E00' : '#E5A03A'; ctx.fillText(p.tag, p.x + 8 * dpr, p.y + 18 * dpr); }
+  const arrows = () => { ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex, ey - a); ctx.moveTo(ex, ey); ctx.lineTo(ex - a, ey); };
+  const glyphs = (txt, x, y) => { ctx.save(); ctx.lineWidth = 3 * dpr; ctx.lineJoin = 'round'; ctx.strokeStyle = L ? 'rgba(255,255,255,.85)' : 'rgba(8,10,14,.8)'; ctx.strokeText(txt, x, y); ctx.restore(); ctx.fillStyle = ink; ctx.fillText(txt, x, y); };
+  if (bar < w * 0.6) {
+    const line = () => { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bar, by); };
+    halo(ctx, L, 4 * dpr, line); ctx.strokeStyle = ink; line(); ctx.stroke(); glyphs('1′', bx + bar / 2 - 4 * dpr, by - 5 * dpr);
+  }
+  halo(ctx, L, 4 * dpr, arrows); ctx.strokeStyle = ink; arrows(); ctx.stroke();
+  glyphs('N', ex - 3 * dpr, ey - a - 4 * dpr); glyphs('E', ex - a - 11 * dpr, ey + 4 * dpr);
+  if (p.tag && ['side', 'swipe', 'blink'].includes(S.mode)) { ctx.font = `700 ${13 * dpr}px ${FONT}`; tag(ctx, L, p.tag, p.x + 8 * dpr, p.y + 20 * dpr, L ? '#B86E00' : '#E5A03A', dpr); }
 }
 
 let drag = null;
@@ -696,7 +745,7 @@ function drawCharts() {
   chartSVG($('lcChart'), ph, 'mjd', 'mJy', mjd2date);
   chartSVG($('specChart'), ph.map((p) => ({...p, wl: p.wavelength_um})), 'wl', 'mJy', (v) => v.toFixed(1) + 'µm', [0.7, 5.05]);
   const dets = new Set(ph.map((p) => p.detector)); const wl = ph.map((p) => p.wavelength_um).filter((v) => v);
-  $('photNote').textContent = `In millijansky, measured in a 2-pixel circle ${S.data.tracked ? 'at the predicted position of the asteroid' : 'at the target'}. Frames span ${wl.length ? Math.min(...wl).toFixed(2) + ' to ' + Math.max(...wl).toFixed(2) + ' µm' : 'several wavelengths'}, so part of the change is colour. Hollow points are saturated.`;
+  $('photNote').textContent = `In millijansky, measured in a 2-pixel circle ${S.data.tracked ? 'at the predicted position of the asteroid' : 'at the target'}. Frames span ${wl.length ? Math.min(...wl).toFixed(2) + ' to ' + Math.max(...wl).toFixed(2) + ' µm' : 'several wavelengths'}, so part of the change is colour. Hollow points are saturated or flagged.`;
   highlightCharts();
 }
 function highlightCharts() {
@@ -710,11 +759,19 @@ function jumpToFrame(id) {
   setFrame(i);
 }
 
+function defaultDetector(frames) {
+  const n = {}; frames.forEach((f) => { n[f.detector] = (n[f.detector] || 0) + 1; });
+  let best = 0;
+  for (const d of [6, 5, 4, 3, 2, 1]) if ((n[d] || 0) >= 3 && (n[d] || 0) > (n[best] || 0)) best = d;
+  return best;
+}
+
 function onData(data, opts = {}) {
   play(false);
   S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null;
   S.catalogs = {gaia: null, allwise: null}; S.zoom = 1; S.panX = S.panY = 0;
-  if (opts.det != null && S.frames.some((f) => f.detector === opts.det)) S.det = opts.det; else S.det = 0;
+  if (opts.det === 0 || S.frames.some((f) => f.detector === opts.det)) S.det = opts.det;
+  else S.det = defaultDetector(S.frames);
   $('stageMsg').textContent = S.frames.length ? '' : 'SPHEREx has no images of this position yet.';
   showNotes(); buildDetList();
   $('inspector').innerHTML = '<p class="muted">Pick a change from the list or click its circle on the image.</p>';
@@ -812,7 +869,7 @@ function updateURL() {
   if (!S.data) return; const p = new URLSearchParams();
   if (S.query && S.query.slug) p.set('obj', S.query.slug);
   else { p.set('ra', S.data.target.ra.toFixed(6)); p.set('dec', S.data.target.dec.toFixed(6)); p.set('fov', $('fovSelect').value); }
-  if (S.det) p.set('det', S.det); if (S.mode !== 'timelapse') p.set('mode', S.mode);
+  p.set('det', S.det ? S.det : 'all'); if (S.mode !== 'timelapse') p.set('mode', S.mode);
   if (document.body.classList.contains('embed')) p.set('embed', '1');
   try { history.replaceState(null, '', `${location.pathname}?${p}`); } catch (_) { return; }
 }
@@ -913,7 +970,7 @@ function wire() {
   $('showGaia').addEventListener('change', (e) => e.target.checked ? loadCatalog('gaia') : draw());
   $('showWise').addEventListener('change', (e) => e.target.checked ? loadCatalog('allwise') : draw());
   $('resetBtn').addEventListener('click', () => {
-    $('stretchSelect').value = 'asinh'; $('clipSelect').value = '99.5'; $('cmapSelect').value = 'plate'; $('layerSelect').value = 'clean';
+    $('stretchSelect').value = 'asinh'; $('clipSelect').value = '99.5'; $('cmapSelect').value = 'magma'; $('layerSelect').value = 'clean';
     $('brightness').value = 0; $('contrast').value = 1; $('gamma').value = 1; $('lockScale').checked = true; $('smoothChk').checked = false; $('repairChk').checked = true;
     S.zoom = 1; S.panX = S.panY = 0; S.scaleCache.clear(); draw(); renderThumbs();
   });
@@ -950,7 +1007,7 @@ async function init() {
   if (p.get('embed') === '1') document.body.classList.add('embed');
   if (p.get('fov')) $('fovSelect').value = p.get('fov');
   await Promise.all([loadIndex(), checkApi()]);
-  const opts = {det: p.get('det') ? +p.get('det') : null};
+  const opts = {det: p.get('det') === 'all' ? 0 : p.get('det') ? +p.get('det') : null};
   if (p.get('mode')) setMode(p.get('mode'));
   if (p.get('obj')) await loadStatic(p.get('obj'), opts);
   else if (p.get('ra') && p.get('dec')) await goCoords(+p.get('ra'), +p.get('dec'), p.get('name'), opts);
@@ -963,8 +1020,9 @@ async function init() {
   }
 }
 window.SPX = {
-  state: S, loadStatic, setMode, setFrame, play, selectDetection, draw,
+  state: S, pixels: fr => frameArr(fr, 'img'), color: (t) => { const l = lut('magma'); const k = Math.round(clamp(t, 0, 1) * 255) * 3; return [l[k], l[k + 1], l[k + 2]]; }, loadStatic, setMode, setFrame, play, selectDetection, draw,
   setAB(a, b) { S.A = a; S.B = b; fillAB(); updateStrip(); draw(); },
+  setDetector(d) { S.det = d; applyFilter(); updateURL(); },
   setStack(kind) { const r = document.querySelector(`input[name=stackKind][value=${kind}]`); if (r) r.checked = true; draw(); },
   ready: init(),
 };

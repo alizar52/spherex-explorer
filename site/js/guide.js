@@ -42,7 +42,7 @@ const TIPS = [
   ['.plate', 'One photograph',
     'Date, detector array and infrared wavelength of this photo. The coloured bar shows the detector array. Click to look at it.'],
   ['#cmapSelect', 'Colours',
-    'Plate shows stars dark on light, like the glass plates astronomers used for a century; faint things are easier to see. Grey shows them light on dark.'],
+    'Magma is the usual false-colour look of infrared images: dark sky, bright stars in yellow and white. Grey is plain black and white. Negative shows stars dark on light, which can make faint things easier to see.'],
   ['#layerSelect', 'Layer',
     'What to show: the sky with the background glow removed, the raw recording, the glow of zodiacal dust on its own, the noise, or the pixels marked as bad.'],
   ['#stretchSelect', 'Stretch', 'How brightness maps to shade. asinh shows faint and bright stars together; linear is true to the numbers.'],
@@ -183,19 +183,19 @@ const lastIndex = (x) => x.state.view.length - 1;
 const GUIDES = [
   {
     id: 'barnard', slug: 'barnards-star', title: 'Watch the fastest star move', length: '1 minute',
-    text: 'Barnard\'s Star crosses the sky faster than any other star. See it shift between two photos taken seven months apart.',
+    text: 'Barnard\'s Star crosses the sky faster than any other star. See it shift between two photos taken a year apart.',
     steps: [
       {el: '#stageWrap', side: 'right', title: 'A patch of infrared sky',
         before: async (x) => { await x.loadStatic('barnards-star'); x.play(false); x.setMode('timelapse'); x.setFrame(0); },
-        text: 'This is a small patch of sky around Barnard\'s Star, photographed by SPHEREx in infrared. Each dark dot is a star.\n\nThe photo is shown as a negative, dark stars on a light background, the way astronomers looked at glass photographic plates. Faint things are easier to see that way.'},
-      {el: '#strip', side: 'top', title: 'Eight photos of the same spot',
-        text: (S) => `SPHEREx photographed this spot ${S.view.length} times between ${S.view[0].date.slice(0, 7)} and ${S.view[S.view.length - 1].date.slice(0, 7)}. Each square is one photo, in date order. Click any of them to look at it.`},
+        text: 'This is a small patch of sky around Barnard\'s Star, photographed by SPHEREx in infrared. Each bright dot is a star.\n\nInfrared light has no colour our eyes can see, so the picture uses false colour: dark purple is empty sky, yellow and white are the brightest stars.'},
+      {el: '#strip', side: 'top', title: 'Photos of the same spot',
+        text: (S) => `SPHEREx photographed this spot ${S.frames.length} times between ${S.frames[0].date.slice(0, 7)} and ${S.frames[S.frames.length - 1].date.slice(0, 7)}, in six infrared colours.${S.det ? ` The strip shows the ${S.view.length} taken with array D${S.det}, so they all have the same colour.` : ''} Each square is one photo, in date order. Click any of them to look at it.`},
       {el: '#stageWrap', side: 'right', title: 'Now watch it jump',
         before: async (x) => { x.setMode('blink'); x.setAB(0, lastIndex(x)); x.play(true); },
-        text: 'The first and the last photo now flip back and forth. Look at the big dark star near the top: it jumps a little, while every other star stays still.\n\nThat jump is Barnard\'s Star moving through space, about one pixel in seven months.'},
+        text: 'The first and the last photo now flip back and forth. Look at the big bright star in the middle: it jumps a little, while every other star stays still.\n\nThat jump is Barnard\'s Star moving through space, almost two pixels in a year.'},
       {el: '#detList', side: 'top', title: 'The computer saw it too',
         before: async (x) => { x.play(false); x.setMode('timelapse'); selectDet(x, (d) => d.kind === 'shifted'); },
-        text: (S) => { const d = findDet(S, (q) => q.kind === 'shifted'); return d ? `Nobody told the program where to look. It measured every star in the field and found one drifting by ${d.motion_arcsec_per_year}″ a year.` : 'The program measured every star in the field and flagged the one that drifts.'; }},
+        text: (S) => { const d = findDet(S, (q) => q.kind === 'shifted'); return d ? `Nobody told the program where to look. It measured every star in all ${S.frames.length} photos and found one drifting by ${d.motion_arcsec_per_year}″ a year.` : 'The program measured every star in the field and flagged the one that drifts.'; }},
       {el: '#inspector', side: 'top', title: 'Checking the answer',
         text: (S) => { const d = findDet(S, (q) => q.kind === 'shifted'); return d ? `Star catalogues give ${d.catalog_motion_arcsec_per_year}″ a year for Barnard's Star. Our ${d.motion_arcsec_per_year}″ is close. Part of the difference is parallax: Earth itself moved around the Sun between the photos.\n\nA star that moves this fast across the sky is usually close to us. Barnard's Star is six light-years away.` : 'The measured motion is close to the value in star catalogues.'; }},
       {el: '.res-col.charts', side: 'top', title: 'When a measurement can\'t be trusted',
@@ -216,7 +216,7 @@ const GUIDES = [
         text: 'Averaging all photos lowers the noise, the same way a long exposure works. Look for a faint smudge at the crosshair.'},
       {el: '#detList', side: 'top', title: 'A hint, not a discovery',
         before: async (x) => { selectDet(x, (d) => !!d.name); },
-        text: (S) => { const s = S.data.target_summary; return s ? `Measuring exactly at the crosshair gives a signal ${s.snr_vs_empty_sky} times stronger than the noise. But ${Math.round(s.fraction_random_brighter * 100)}% of random spots in this field are just as bright.\n\nSo the data hints that something is there, but does not prove it. Each new SPHEREx pass adds more photos and makes the answer clearer.` : 'The signal at the crosshair is weak. The data hints that something is there but does not prove it.'; }},
+        text: (S) => { const s = S.data.target_summary; return s ? `Measuring exactly at the crosshair gives a signal ${s.snr_vs_empty_sky} times stronger than the noise. But ${Math.round(s.fraction_random_brighter * 100)}% of random spots in this field are just as bright.\n\nThis uses only the two longest-wavelength arrays, D5 and D6, where the brown dwarf gives off its light. The Spitzer telescope measured about the same brightness there.\n\nSo the data hints that something is there, but does not prove it. Each new SPHEREx pass adds more photos and makes the answer clearer.` : 'The signal at the crosshair is weak. The data hints that something is there but does not prove it.'; }},
     ],
   },
   {
@@ -277,9 +277,7 @@ async function drawGuideIcons() {
     try {
       const d = await (await fetch(`data/targets/${slug}.json`)).json();
       const f = d.frames[0]; const n = d.size;
-      const bin = atob(f.image); const buf = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      const img = new Float32Array(buf.buffer);
+      const img = window.SPX.pixels(f);
       const vals = Array.from(img).filter(Number.isFinite).sort((a, b) => a - b);
       const lo = vals[Math.floor(vals.length * 0.3)]; const hi = vals[Math.floor(vals.length * 0.995)];
       const cv = document.createElement('canvas'); cv.width = n; cv.height = n;
@@ -287,7 +285,7 @@ async function drawGuideIcons() {
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
         const v = img[y * n + x]; const o = ((n - 1 - y) * n + x) * 4;
         const t = Number.isFinite(v) ? Math.asinh(10 * Math.min(1, Math.max(0, (v - lo) / (hi - lo)))) / Math.asinh(10) : 0;
-        const c = 227 - t * 211; id.data[o] = c; id.data[o + 1] = c + t * 4; id.data[o + 2] = c + t * 6; id.data[o + 3] = 255;
+        const m = window.SPX.color(t); id.data[o] = m[0]; id.data[o + 1] = m[1]; id.data[o + 2] = m[2]; id.data[o + 3] = 255;
       }
       ctx.putImageData(id, 0, 0);
       const out = document.createElement('canvas'); out.width = 152; out.height = 112;

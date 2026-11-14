@@ -1,19 +1,6 @@
-"""
-SPHEREx Explorer — core data pipeline.
+"""SPHEREx spectral images to aligned frames, photometry and detected changes.
 
-Turns SPHEREx Level-2 Spectral Image MEFs (full images or IRSA cutouts) into
-small, aligned "frames" the web app can play as a time-lapse:
-
-  * every frame is resampled onto the same north-up grid centred on the
-    requested RA/Dec, so moving objects really move and stars stay put;
-  * IMAGE, ZODI, sqrt(VARIANCE) and a bad-pixel mask (from FLAGS) are kept;
-  * the central wavelength at the target comes from the spectral WCS ("W");
-  * a simple aperture measurement at the target gives a light curve / spectrum;
-  * a change detector compares frames and lists what moved / brightened.
-
-The same code is used by:
-  build_static.py  — offline, from local FITS (e.g. the team dataset)
-  backend/app.py   — live, querying IRSA for any coordinates
+Used offline by build_static.py and live by backend/app.py.
 """
 from __future__ import annotations
 
@@ -36,34 +23,27 @@ import warnings
 warnings.simplefilter("ignore", FITSFixedWarning)
 warnings.filterwarnings("ignore", message="All-NaN slice encountered")
 from astropy import log as _aplog
-_aplog.setLevel("WARNING")  # the spectral WCS ("W") re-uses a header with SIP terms; astropy INFO is noise
+_aplog.setLevel("WARNING")
 
 IRSA = "https://irsa.ipac.caltech.edu"
 TAP_SYNC = f"{IRSA}/TAP/sync"
-PIXSCALE_ARCSEC = 6.15  # SPHEREx native pixel
+PIXSCALE_ARCSEC = 6.15
 
-# SPHEREx detector arrays and their approximate wavelength coverage (µm)
 DETECTORS = {
     1: (0.75, 1.09), 2: (1.10, 1.62), 3: (1.63, 2.41),
     4: (2.42, 3.82), 5: (3.83, 4.41), 6: (4.42, 5.00),
 }
 
-# FLAGS bits treated as "bad pixel". Bit 21 (SOURCE) only marks pixels that
-# contain known sources and must NOT be masked. Check against the table of
-# flags in the SPHEREx Explanatory Supplement if IRSA changes the definitions.
 FLAG_NAMES = {0: "TRANSIENT", 1: "OVERFLOW", 2: "SUR_ERROR", 4: "PHANTOM", 5: "REFERENCE", 6: "NONFUNC",
               7: "DICHROIC", 9: "MISSING_DATA", 10: "HOT", 11: "COLD", 12: "FULLSAMPLE", 14: "PHANMISS",
               15: "NONLINEAR", 17: "PERSIST", 19: "OUTLIER", 21: "SOURCE", 26: "BLOOM"}
 BAD_BITS = [0, 1, 2, 6, 7, 9, 10, 11, 15]
 BAD_MASK = sum(1 << b for b in BAD_BITS)
-MIN_PM_ARCSEC_YR = 2.5   # smallest proper motion reported (about 0.4 px per year)
+MIN_PM_ARCSEC_YR = 2.5
 
 
-# ----------------------------------------------------------------------------
-# Small helpers
-# ----------------------------------------------------------------------------
 def detector_from_name(name: str | None) -> int | None:
-    """level2_2026W38_1A_0606_1D6_spx... -> 6 ; 'SPHEREx-D3' -> 3"""
+    """Detector number from a file name (..._1D6_spx...) or band name (SPHEREx-D3)."""
     if not name:
         return None
     m = re.search(r"_\d+D(\d)_spx", name) or re.search(r"D(\d)\b", name)
@@ -104,9 +84,6 @@ def robust_sigma(a: np.ndarray) -> float:
     return float(1.4826 * np.median(np.abs(a - med)))
 
 
-# ----------------------------------------------------------------------------
-# One observation -> one aligned frame
-# ----------------------------------------------------------------------------
 @dataclass
 class Frame:
     id: str
@@ -114,16 +91,16 @@ class Frame:
     detector: int | None
     wavelength_um: float | None
     bandwidth_um: float | None
-    image: np.ndarray          # MJy/sr, resampled, NaN = no data
-    zodi: np.ndarray | None    # MJy/sr
-    noise: np.ndarray | None   # sqrt(variance), MJy/sr
-    bad: np.ndarray            # bool, flagged pixels
+    image: np.ndarray
+    zodi: np.ndarray | None
+    noise: np.ndarray | None
+    bad: np.ndarray
     meta: dict = field(default_factory=dict)
-    image_masked: np.ndarray | None = None  # image with flagged input pixels removed before resampling
+    image_masked: np.ndarray | None = None
 
     @property
     def clean(self) -> np.ndarray:
-        """zodi-subtracted image with flagged pixels set to NaN"""
+        """Image minus zodiacal light, with flagged pixels set to NaN."""
         base = self.image_masked if self.image_masked is not None else self.image
         im = base - (self.zodi if self.zodi is not None else 0.0)
         im = np.where(self.bad, np.nan, im)
@@ -172,14 +149,12 @@ def process_hdul(hdul: fits.HDUList, ra: float, dec: float, size_px: int,
 
     image = resample(data)
     if np.isfinite(image).mean() < min_coverage:
-        return None  # this image barely overlaps the requested frame
+        return None
 
     fl_hdu = _ext(hdul, "FLAGS")
     image_masked = None
     if fl_hdu is not None and fl_hdu.data is not None:
         badsrc = (np.asarray(fl_hdu.data).astype(np.int64) & BAD_MASK) != 0
-        # the image is interpolated bilinearly, so a flagged input pixel leaks into up to four
-        # output pixels: mark every output pixel that takes more than 15 % of its value from one
         bad = ndimage.map_coordinates(badsrc.astype(float), coords, order=1, mode="constant", cval=1.0) > 0.15
         image_masked = resample(np.where(badsrc, np.nan, data))
     else:
@@ -195,7 +170,6 @@ def process_hdul(hdul: fits.HDUList, ra: float, dec: float, size_px: int,
     if v_hdu is not None and v_hdu.data is not None:
         noise = np.sqrt(np.clip(resample(v_hdu.data), 0, None))
 
-    # Central wavelength at the target from the spectral WCS (key "W")
     wl, bw = wavelength_hint, None
     try:
         swcs = WCS(hdr, fobj=hdul, key="W")
@@ -233,13 +207,10 @@ def process_hdul(hdul: fits.HDUList, ra: float, dec: float, size_px: int,
                  image=image, zodi=zodi, noise=noise, bad=bad, meta=meta, image_masked=image_masked)
 
 
-# ----------------------------------------------------------------------------
-# Photometry at the target position
-# ----------------------------------------------------------------------------
 def aperture_flux(frame: Frame, x: float, y: float, r: float = 2.0,
                   r_in: float = 5.0, r_out: float = 9.0) -> dict:
     half = frame.image.shape[0] / 2
-    if r_out > half:                      # small cutouts: shrink the sky annulus
+    if r_out > half:
         r_out = max(half, r + 2.5)
         r_in = max(r + 1.0, r_out - 2.5)
     base = frame.image_masked if frame.image_masked is not None else frame.image
@@ -259,15 +230,11 @@ def aperture_flux(frame: Frame, x: float, y: float, r: float = 2.0,
         var = float(np.nansum(frame.noise[good] ** 2))
     else:
         var = good.sum() * robust_sigma(im[ann]) ** 2
-    # MJy/sr * pixel solid angle -> mJy (no aperture correction: relative flux)
     pix_sr = (PIXSCALE_ARCSEC / 206264.806) ** 2
     k = pix_sr * 1e6 * 1e3
     return {"flux": s * k, "err": math.sqrt(max(var, 0)) * k, "flagged": flagged}
 
 
-# ----------------------------------------------------------------------------
-# Change detection (heuristic; the ML model can replace or complement it)
-# ----------------------------------------------------------------------------
 def _peaks(z: np.ndarray, thresh: float, min_sep: int = 3, edge: int = 2):
     zz = np.where(np.isfinite(z), z, 0.0)
     mx = ndimage.maximum_filter(zz, size=2 * min_sep + 1)
@@ -276,7 +243,6 @@ def _peaks(z: np.ndarray, thresh: float, min_sep: int = 3, edge: int = 2):
     ys, xs = np.nonzero(cand)
     out = []
     for y, x in zip(ys, xs):
-        # sub-pixel centroid in a 3x3 box
         y0, y1, x0, x1 = max(y - 1, 0), y + 2, max(x - 1, 0), x + 2
         w = np.clip(zz[y0:y1, x0:x1], 0, None)
         gy, gx = np.mgrid[y0:y1, x0:x1]
@@ -298,7 +264,7 @@ def _centroid(im: np.ndarray, x: float, y: float, r: float = 2.5, iters: int = 3
     for _ in range(iters):
         d = np.hypot(xx - x, yy - y)
         ann = (d > r + 2) & (d < r + 6) & np.isfinite(im)
-        if ann.sum() < 8:                       # small cutout: use everything outside the aperture
+        if ann.sum() < 8:
             ann = (d > r + 0.5) & np.isfinite(im)
         if ann.sum() < 8:
             return None
@@ -333,19 +299,14 @@ def _ap(im, noise, bad, x, y, r=2.0):
 
 
 def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
-    """Compare frames of the same detector array and list candidate changes.
+    """Find changes between frames of the same detector array.
 
-    kinds:
-      moving    – a source not present in the reference sky that appears at
-                  >=3 places lying on one straight line in time order
-                  (asteroid, comet)
-      shifted   – a known source whose centre drifts steadily with time
-                  (proper motion of a nearby star / brown dwarf)
-      variable  – a known source whose brightness differs significantly
-                  between frames taken at nearly the same wavelength
-      transient – a strong new spot in a single frame only (cosmic ray,
-                  artefact or real transient — needs a human look)
-    The scores are heuristic (0–1), not probabilities.
+    moving     new source on a straight line through at least three frames
+    shifted    known source whose centroid drifts linearly in time (proper motion)
+    variable   known source whose flux ratio to the field stars changes
+    transient  strong source in a single frame only
+
+    confidence is a heuristic score between 0 and 1.
     """
     if len(frames) < 2:
         return []
@@ -355,7 +316,7 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
     for f in frames:
         by_det.setdefault(f.detector, []).append(f)
 
-    fresh = []      # (frame, x, y, z, on_reference_source)
+    fresh = []
     dets: list[dict] = []
     for det, group in by_det.items():
         if len(group) < 2:
@@ -368,7 +329,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
         if not np.isfinite(rsig) or rsig <= 0:
             continue
 
-        # --- reference sources: measure position and flux in every frame --------
         raw = [g.image - (g.zodi if g.zodi is not None else 0.0) for g in group]
         yy, xx = np.mgrid[0:n, 0:n]
         srcs = _peaks(ref / rsig, 8.0, min_sep=3, edge=edge)
@@ -377,8 +337,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             near = np.hypot(xx - sx0, yy - sy0) <= 2.0
             cents, fluxes = [], {}
             for k, (g, c) in enumerate(zip(group, clean)):
-                # a flagged core (saturated star) leaves a hole in the cleaned image:
-                # centroid on the unmasked image in that case
                 cc = _centroid(raw[k] if g.bad[near].any() else c, sx0, sy0)
                 if cc is None or math.hypot(cc[0] - sx0, cc[1] - sy0) > 3:
                     continue
@@ -388,7 +346,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                     fluxes[k] = (f, e)
             meas.append(dict(x=sx0, y=sy0, cents=cents, fluxes=fluxes))
 
-        # --- proper motion: the centre drifts linearly with time ---------------
         for m in meas:
             cents = m["cents"]
             if len(cents) < 4:
@@ -398,7 +355,7 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             if np.ptp(t) < 0.05:
                 continue
             keep = np.ones(len(t), bool)
-            for _ in range(2):          # linear fit, drop the single worst point once
+            for _ in range(2):
                 tt = t[keep] - t[keep].mean()
                 A = np.c_[tt, np.ones_like(tt)]
                 (vx, x0), *_ = np.linalg.lstsq(A, xs[keep], rcond=None)
@@ -409,7 +366,7 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                     break
                 keep[np.flatnonzero(keep)[np.argmax(res)]] = False
             rms = max(rms, 0.03)
-            speed = math.hypot(vx, vy) * PIXSCALE_ARCSEC            # arcsec / yr
+            speed = math.hypot(vx, vy) * PIXSCALE_ARCSEC
             disp = math.hypot(vx, vy) * np.ptp(t[keep])
             zv = math.hypot(vx, vy) / (rms / math.sqrt(max(np.sum(tt ** 2), 1e-9)))
             if zv > 6 and rms < 0.25 and disp > 0.25 and speed >= MIN_PM_ARCSEC_YR:
@@ -423,7 +380,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                                  motion_north_arcsec_per_year=round(vy * PIXSCALE_ARCSEC, 2),
                                  displacement_px=round(disp, 2), fit_rms_px=round(rms, 3)))
 
-        # --- variability: differential photometry against the other stars -------
         for mi, m in enumerate(meas):
             if m.get("shifted"):
                 continue
@@ -439,10 +395,10 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                     (fi, ei), (fj, ej) = m["fluxes"][i], m["fluxes"][j]
                     comp = [math.log(o["fluxes"][i][0] / o["fluxes"][j][0]) for oi, o in enumerate(meas)
                             if oi != mi and i in o["fluxes"] and j in o["fluxes"]]
-                    if len(comp) >= 4:      # frame-to-frame colour / calibration term from the field
+                    if len(comp) >= 4:
                         zero = float(np.median(comp))
                         scat = max(1.4826 * float(np.median(np.abs(np.array(comp) - zero))), 0.03)
-                    elif dw <= 0.01:        # lone source: only nearly identical wavelengths
+                    elif dw <= 0.01:
                         zero, scat = 0.0, 0.08
                     else:
                         continue
@@ -459,7 +415,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                                  frames=[group[k].id for k in ks], amplitude_ratio=round(amp, 2),
                                  brightest_frame=hi.id, faintest_frame=lo.id, comparison_stars=ncomp))
 
-        # --- new sources (not in the reference sky) ------------------------
         refmask = ref / rsig > 5
         refmask = ndimage.binary_dilation(refmask, iterations=2)
         for i, g in enumerate(group):
@@ -474,7 +429,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             for (x, y, zz) in _peaks(z, nsig, min_sep=3, edge=edge):
                 fresh.append((g, x, y, zz, bool(refmask[int(round(y)), int(round(x))])))
 
-    # --- link new sources into straight-line tracks -----------------------
     fresh.sort(key=lambda p: p[0].mjd)
     taken = set()
     for a in range(len(fresh)):
@@ -500,7 +454,6 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                 if math.hypot(A[1] + vx * tt - C[1], A[2] + vy * tt - C[2]) < 1.5:
                     chain.append(c)
                     used_frames.add(C[0].id)
-            # a real mover must be off-source in most of its points
             if len(chain) >= 3 and sum(fresh[k][4] for k in chain) <= len(chain) // 2 \
                     and (best is None or len(chain) > len(best)):
                 best = (chain, vx, vy)
@@ -521,12 +474,10 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             dets.append(dict(kind="transient", x=x, y=y, snr=float(zz), frames=[g.id],
                              track=[{"frame": g.id, "x": x, "y": y}]))
 
-    # a mover crossing a star makes that star look "variable" -> drop those
     movers = [pt for d in dets if d["kind"] == "moving" for pt in d.pop("_path")]
     dets = [d for d in dets if not (d["kind"] == "variable" and any(
         math.hypot(px - d["x"], py - d["y"]) < 4 for px, py in movers))]
 
-    # --- merge duplicates (same place, e.g. several detector groups) -------
     prio = {"moving": 0, "shifted": 1, "variable": 2, "transient": 3}
     dets.sort(key=lambda d: (prio[d["kind"]], -d["snr"]))
     merged: list[dict] = []
@@ -556,13 +507,9 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
     return merged
 
 
-# ----------------------------------------------------------------------------
-# Package frames for the web app
-# ----------------------------------------------------------------------------
 def forced_summary(frames: list[Frame], track: list[tuple[float, float]], n_random: int = 400,
                    seed: int = 1) -> dict | None:
-    """Combine aperture fluxes measured at given positions (one per frame) and compare
-    the result with the same measurement at random places of the field."""
+    """Mean forced flux along a track, compared with the same measurement at random positions."""
     def combine(pts):
         fl, er = [], []
         for f, (x, y) in zip(frames, pts):
@@ -602,8 +549,7 @@ def year_of(mjd: float) -> float:
 
 
 def predict_position(target: dict, mjd: float) -> tuple[float, float]:
-    """Sky position of a target at a date. target: ra, dec [deg] at 'epoch' [year],
-    optional pmra (already * cos dec) and pmdec in mas/yr."""
+    """Position at a given MJD from ra, dec at epoch and proper motion (pmra includes cos dec, mas/yr)."""
     dt = year_of(mjd) - target.get("epoch", 2000.0)
     ra = target["ra"] + dt * target.get("pmra", 0.0) / 3.6e6 / math.cos(math.radians(target["dec"]))
     return ra, target["dec"] + dt * target.get("pmdec", 0.0) / 3.6e6
@@ -614,8 +560,10 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
                   notes: list[str] | None = None, extra: dict | None = None,
                   run_detection: bool = True, tracked: bool = False,
                   target: dict | None = None) -> dict:
-    """ra, dec = centre of the frames. target (optional) = the object of interest when it
-    is not at the frame centre and/or moves (see predict_position)."""
+    """Frames, photometry and detections as one JSON-ready dict.
+
+    ra, dec is the frame centre; target is the object of interest when it is off-centre or moving.
+    """
     frames = sorted(frames, key=lambda f: f.mjd)
     c = (size_px - 1) / 2
     w = target_wcs(ra, dec, size_px)
@@ -625,7 +573,7 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
         if target:
             px, py = (float(v) for v in w.all_world2pix([predict_position(target, f.mjd)], 0)[0])
         mx, my, recentred = px, py, False
-        if not tracked:   # follow the real source if there is a clear one within 2.5 px
+        if not tracked:
             cc = _centroid(f.image - (f.zodi if f.zodi is not None else 0.0), px, py)
             if cc and math.hypot(cc[0] - px, cc[1] - py) <= 2.5:
                 t = aperture_flux(f, cc[0], cc[1])
@@ -705,9 +653,6 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
     return payload
 
 
-# ----------------------------------------------------------------------------
-# Live access to IRSA (used by the backend)
-# ----------------------------------------------------------------------------
 def query_observations(ra: float, dec: float, detector: int | None = None,
                        timeout: float = 60.0, client=None) -> list[dict]:
     """All SPHEREx spectral images whose footprint contains (ra, dec)."""
@@ -737,7 +682,6 @@ def query_observations(ra: float, dec: float, detector: int | None = None,
             continue
         out.append({"uri": uri, "mjd": mjd, "band": row.get("energy_bandpassname"),
                     "detector": detector_from_name(row.get("energy_bandpassname")) or detector_from_name(uri)})
-    # drop duplicates (same file listed twice)
     seen, uniq = set(), []
     for o in out:
         if o["uri"] not in seen:
@@ -747,7 +691,7 @@ def query_observations(ra: float, dec: float, detector: int | None = None,
 
 
 def pick_spread(obs: list[dict], max_frames: int) -> list[dict]:
-    """Keep at most max_frames, spread evenly in time (always keep first/last)."""
+    """At most max_frames observations, spread evenly in time."""
     if len(obs) <= max_frames:
         return obs
     idx = np.unique(np.round(np.linspace(0, len(obs) - 1, max_frames)).astype(int))
@@ -770,7 +714,7 @@ def fetch_live(ra: float, dec: float, size_px: int = 64, detector: int | None = 
         obs = pick_spread(obs, max_frames)
         if total > len(obs):
             notes.append(f"SPHEREx has {total} images of this point. Showing {len(obs)} of them, spread evenly in time.")
-        size_deg = size_px * PIXSCALE_ARCSEC / 3600 * 1.45  # margin for rotated detectors
+        size_deg = size_px * PIXSCALE_ARCSEC / 3600 * 1.45
 
         def job(o):
             url = cutout_url(o["uri"], ra, dec, size_deg)
@@ -789,6 +733,6 @@ def fetch_live(ra: float, dec: float, size_px: int = 64, detector: int | None = 
                     f = fut.result()
                     if f is not None:
                         frames.append(f)
-                except Exception as e:  # one bad cutout should not kill the request
+                except Exception as e:
                     notes.append(f"One image could not be downloaded ({type(e).__name__}) and was skipped.")
     return build_payload(frames, ra, dec, size_px, name=name, source="IRSA live", notes=notes)

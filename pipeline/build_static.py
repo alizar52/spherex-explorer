@@ -1,19 +1,12 @@
-"""
-Build the static data the website loads (site/data/...).
+"""Build the JSON files the website reads (site/data).
 
-    python pipeline/build_static.py \
-        --metadata DATASET/metadata.csv --fits-root DATASET \
-        --challenge-dir DATASET/nasa_demo \
-        --out site/data
+Usage:
+    python pipeline/build_static.py --metadata DATA/metadata.csv --fits-root DATA \
+        --challenge-dir DATA/nasa_demo --out site/data --fresh
 
-  --metadata / --fits-root   team dataset: metadata.csv + folder with the FITS cutouts
-                             (files are matched by file name, any sub-folder layout works)
-  --challenge-dir            folder with one sub-folder of FITS per challenge test target
-                             (Barnards_Star, Epsilon_Indi_B, WISE_0855, RW_Aur, R_Dra)
-  --official                 instead of local files: fetch the challenge targets live from IRSA
-
-Every object becomes site/data/targets/<slug>.json and site/data/index.json lists them.
-Re-run after new downloads / new SPHEREx releases — the website itself does not change.
+--metadata, --fits-root  team dataset; FITS files are matched by file name
+--challenge-dir          one sub-folder of FITS per challenge target
+--official               download the challenge targets from IRSA instead
 """
 from __future__ import annotations
 
@@ -33,10 +26,8 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import spherex as sx  # noqa: E402
+import spherex as sx
 
-# Test targets named in the challenge statement.
-# ra/dec [deg, ICRS] at `epoch`; pmra (= mu_alpha * cos dec) and pmdec in mas/yr.
 OFFICIAL_TARGETS = [
     {"name": "Barnard's Star", "folder": "Barnards_Star", "kind": "fast-moving star",
      "ra": 269.452079, "dec": 4.693364, "epoch": 2000.0, "pmra": -801.6, "pmdec": 10362.4,
@@ -93,8 +84,6 @@ def brightest_source(frames: list[sx.Frame]) -> tuple[float, float, float] | Non
     ims = np.array([sx._nan_smooth(f.image - (f.zodi if f.zodi is not None else 0), 0.8) for f in frames])
     with np.errstate(all="ignore"):
         med = np.nanmedian(ims, axis=0) if len(frames) > 1 else ims[0]
-    # only look near the catalogue position (8 px = 49″), so that in larger cutouts an unrelated
-    # brighter star is not taken for the target
     n = med.shape[0]
     yy, xx = np.mgrid[0:n, 0:n]
     med = np.where(np.hypot(xx - (n - 1) / 2, yy - (n - 1) / 2) <= 8, med, np.nan)
@@ -108,9 +97,6 @@ def brightest_source(frames: list[sx.Frame]) -> tuple[float, float, float] | Non
     return (cc[0], cc[1], snr) if cc else (float(ix), float(iy), snr)
 
 
-# ----------------------------------------------------------------------------
-# Team dataset (metadata.csv)
-# ----------------------------------------------------------------------------
 def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None = None,
                   only: list[str] | None = None, demo: bool = False) -> list[dict]:
     rows = list(csv.DictReader(open(metadata, newline="", encoding="utf-8")))
@@ -131,7 +117,7 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
             print(f"- {name}: no FITS found")
             continue
         coords = {(round(float(r["ra_deg"]), 5), round(float(r["dec_deg"]), 5)) for r in rs}
-        tracked = len(coords) > 1 or cls == "moving"   # ephemeris position per epoch (asteroids)
+        tracked = len(coords) > 1 or cls == "moving"
         ra0, dec0 = float(rs[0]["ra_deg"]), float(rs[0]["dec_deg"])
         n = size or int(np.median([cutout_info(p)[2] for _, p in paths]))
         frames = []
@@ -169,12 +155,12 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
         if rs[0].get("label_status") and not demo:
             notes.append(f"The team dataset labels this object “{cls}”. The label has not been checked scientifically.")
         if demo:
-            notes.append("SYNTHETIC DEMO DATA — generated to test the interface, not real SPHEREx images.")
+            notes.append("Synthetic test data, not real SPHEREx images.")
         payload = sx.build_payload(frames, ra0, dec0, n, name=shown, notes=notes, tracked=tracked,
                                    source="synthetic demo" if demo else "team dataset (IRSA SPHEREx cutouts)",
                                    run_detection=not tracked, target=target,
                                    extra={"class_label": cls, "demo": demo})
-        if n < 24:   # keep only what a tiny field can support
+        if n < 24:
             payload["detections"] = [d for d in payload["detections"] if d["kind"] == "variable"]
             for i, d in enumerate(payload["detections"]):
                 d["id"] = f"C{i + 1:03d}"
@@ -196,9 +182,6 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
     return entries
 
 
-# ----------------------------------------------------------------------------
-# Challenge test targets
-# ----------------------------------------------------------------------------
 def describe_target(t: dict, payload: dict) -> None:
     """Add plain-language notes and a catalogue-guided entry for the named target."""
     notes = payload["notes"]
@@ -277,7 +260,7 @@ def build_official_live(out: Path, size: int = 64, max_frames: int = 40) -> list
         except Exception as e:
             print(f"  ! failed: {e}")
             continue
-        payload["notes"].insert(0, f"{t['name']} — {t['kind']}: {t['note']}.")
+        payload["notes"].insert(0, f"{t['note']}.")
         slug = slugify(t["name"])
         (out / "targets" / f"{slug}.json").write_text(json.dumps(payload, separators=(",", ":")))
         entries.append({"slug": slug, "name": t["name"], "class": "challenge", "ra": ra, "dec": dec, "size": size,
@@ -295,7 +278,7 @@ def write_index(out: Path, entries: list[dict], fresh: bool = False):
     by_slug = {k: v for k, v in by_slug.items() if (out / "targets" / f"{k}.json").exists()}
     official = []
     for t in OFFICIAL_TARGETS:
-        ra, dec = sx.predict_position(t, 61100.0)   # early 2026
+        ra, dec = sx.predict_position(t, 61100.0)
         official.append({"name": t["name"], "slug": slugify(t["name"]), "kind": t["kind"], "note": t["note"],
                          "ra": round(ra, 6), "dec": round(dec, 6)})
     data = {

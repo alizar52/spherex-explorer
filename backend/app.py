@@ -1,15 +1,11 @@
-"""
-SPHEREx Explorer — live API.
+"""Live search server.
 
-  GET /api/frames?ra=133.795&dec=-7.245&fov=64&detector=0&max_frames=30
-      -> same JSON format as site/data/targets/*.json, built on the fly from
-         IRSA (SIA/TAP query + cutouts). Cached in memory.
-  GET /api/resolve?name=R+Dra
-      -> {"name", "ra", "dec"} via CDS Sesame
-  GET /api/health
+GET /api/frames?ra=&dec=&fov=&detector=&max_frames=   frames for any position, from IRSA
+GET /api/resolve?name=                                 object name to coordinates (CDS Sesame)
+GET /api/catalog?cat=gaia|allwise&ra=&dec=&radius=     catalogue sources around a position
+GET /api/health
 
-Run locally:  uvicorn backend.app:app --reload --port 8000
-Deploy free:  Hugging Face Spaces (Docker) — see Dockerfile / README.
+Run: uvicorn backend.app:app --port 8000
 """
 from __future__ import annotations
 
@@ -27,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
-import spherex as sx  # noqa: E402
+import spherex as sx
 
 app = FastAPI(title="SPHEREx Explorer API", version="1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
@@ -50,7 +46,6 @@ def health():
 def frames(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
            fov: int = Query(64, ge=24, le=200), detector: int = Query(0, ge=0, le=6),
            max_frames: int = Query(30, ge=2, le=80)):
-    # round so nearby requests share the cache
     key = (round(ra, 5), round(dec, 5), int(fov), int(detector), int(max_frames))
     try:
         data = _frames_cached(*key)
@@ -77,7 +72,6 @@ def resolve(name: str = Query(..., min_length=1, max_length=80)):
 
 
 CATALOGS = {
-    # VizieR table, RA col, Dec col, magnitude col, label
     "gaia": ("I/355/gaiadr3", "RA_ICRS", "DE_ICRS", "Gmag", "Gaia DR3 (epoch 2016.0)"),
     "allwise": ("II/328/allwise", "RAJ2000", "DEJ2000", "W1mag", "AllWISE (epoch ~2010.5)"),
 }
@@ -111,7 +105,6 @@ def catalog(cat: str = Query("gaia", pattern="^(gaia|allwise)$"), ra: float = Qu
         raise HTTPException(502, f"VizieR request failed: {e}")
 
 
-# Optional: serve the website from the same server (useful on HF Spaces)
 SITE = ROOT / "site"
 if SITE.exists() and os.environ.get("SERVE_SITE", "1") == "1":
     app.mount("/", StaticFiles(directory=SITE, html=True), name="site")

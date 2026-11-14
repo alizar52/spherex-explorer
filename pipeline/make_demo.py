@@ -1,14 +1,8 @@
-"""
-Generate SYNTHETIC SPHEREx-like FITS files to test the website end-to-end
-before real data arrive. Files have the same layout as SPHEREx Level-2
-spectral images (IMAGE / FLAGS / VARIANCE / ZODI with a rotated TAN+SIP-free
-WCS and MJD-AVG), plus a metadata.csv in the team-dataset format.
+"""Write synthetic FITS files in the SPHEREx Level-2 layout, for testing without real data.
 
+Usage:
     python pipeline/make_demo.py --out demo_data
-    python pipeline/build_static.py --metadata demo_data/metadata.csv \
-        --fits-root demo_data --out site/data --demo
-
-Nothing here is real data; the website labels it "synthetic demo".
+    python pipeline/build_static.py --metadata demo_data/metadata.csv --fits-root demo_data --demo
 """
 from __future__ import annotations
 
@@ -39,8 +33,8 @@ def star_field(ra, dec, nstars=70, radius=0.12):
     th = rng.random(nstars) * 2 * np.pi
     sra = ra + r * np.cos(th) / np.cos(np.deg2rad(dec))
     sdec = dec + r * np.sin(th)
-    flux = 3.0 * rng.pareto(1.6, nstars) + 0.6  # MJy/sr peak
-    color = rng.normal(0, 0.25, nstars)         # spectral slope
+    flux = 3.0 * rng.pareto(1.6, nstars) + 0.6
+    color = rng.normal(0, 0.25, nstars)
     return np.c_[sra, sdec, flux, color]
 
 
@@ -65,16 +59,16 @@ def write_frame(path, w, n, mjd, wl, sources, cosmic=0, unflagged_cosmic=False):
     noise_sig = 0.045
     img = sky + zodi + rng.normal(0, noise_sig, (n, n))
     flags = np.zeros((n, n), np.int32)
-    flags[src_mask] |= 1 << 21  # SOURCE (informational only)
-    for _ in range(cosmic):     # flagged cosmic rays (TRANSIENT bit)
+    flags[src_mask] |= 1 << 21
+    for _ in range(cosmic):
         cy, cx = rng.integers(3, n - 3, 2)
         img[cy, cx] += rng.uniform(3, 8)
         flags[cy, cx] |= 1
-    if unflagged_cosmic:        # one hit the flagging missed -> "transient"
+    if unflagged_cosmic:
         cy, cx = rng.integers(10, n - 10, 2)
         img[cy, cx] += 2.5
         img[cy, cx + 1] += 1.2
-    flags[rng.integers(0, n, 6), rng.integers(0, n, 6)] |= 1 << 6  # dead pixels
+    flags[rng.integers(0, n, 6), rng.integers(0, n, 6)] |= 1 << 6
     var = np.full((n, n), noise_sig ** 2) + 0.002 * np.abs(sky)
 
     hdr = w.to_header()
@@ -120,7 +114,6 @@ def main(out: Path):
         wr = csv.DictWriter(fh, cols)
         wr.writeheader()
 
-        # 1) nearby star with large proper motion: ~3 px over 1.3 years
         ra1, dec1 = 150.20, 2.10
         def mover(mjd, wl):
             yrs = (mjd - 60800) / 365.25
@@ -128,7 +121,6 @@ def main(out: Path):
         ep = [(60800, 3), (60801.5, 3), (60803, 3), (60984, 3), (60986, 3), (61165, 3), (61167, 3), (61350, 3)]
         scenario(out, wr, "DEMO_high_proper_motion", "moving", ra1, dec1, ep, mover)
 
-        # 2) asteroid crossing the field within a day (fixed field, same detector)
         ra2, dec2 = 200.50, -5.30
         def asteroid(mjd, wl):
             t = mjd - 61000
@@ -136,7 +128,6 @@ def main(out: Path):
         ep2 = [(61000.00, 2), (61000.12, 2), (61000.25, 2), (61000.40, 2), (61000.55, 2), (61000.70, 2)]
         scenario(out, wr, "DEMO_asteroid_field", "moving", ra2, dec2, ep2, asteroid)
 
-        # 3) variable star (Mira-like, big infrared amplitude)
         ra3, dec3 = 80.00, 30.00
         def variable(mjd, wl):
             amp = 1.0 + 0.7 * np.sin(2 * np.pi * (mjd - 60800) / 230.0)

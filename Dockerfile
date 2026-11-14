@@ -1,4 +1,3 @@
-# Hugging Face Spaces (Docker SDK) — serves the API *and* the website on port 7860
 FROM python:3.11-slim
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt

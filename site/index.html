@@ -24,18 +24,16 @@
     <button class="btn primary" type="submit">Show</button>
   </form>
   <nav class="topnav" aria-label="Help">
+    <button class="navbtn" id="guidesBtn">Guides</button>
     <button class="navbtn" data-modal="how">How it works</button>
     <button class="navbtn" data-modal="about">About</button>
   </nav>
   <div class="status">
-    <span id="sourceBadge" class="badge">No data loaded</span>
-    <span id="apiBadge" class="badge dim" title="Search for any coordinates">Live search: checking</span>
     <button id="shareBtn" class="btn ghost small">Share</button>
   </div>
 </header>
 
 <main class="layout">
-  <!-- LEFT: what to look at -->
   <aside class="panel left" aria-label="Objects and frame selection">
     <section class="block grow">
       <h2>Objects</h2>
@@ -46,7 +44,7 @@
 
     <section class="block">
       <h2>Field</h2>
-      <label class="row"><span>Size</span>
+      <label class="row needs-api"><span>Size</span>
         <select id="fovSelect">
           <option value="32">3.3′ wide, fastest</option>
           <option value="64" selected>6.6′ wide</option>
@@ -54,7 +52,7 @@
           <option value="128">13.1′ wide, for fast movers</option>
         </select>
       </label>
-      <div class="sub">Detector array</div>
+      <div class="sub needs-api">Detector array</div>
       <div id="detectorChips" class="chips det"></div>
       <p class="hint" id="detHint"></p>
     </section>
@@ -69,7 +67,6 @@
     </section>
   </aside>
 
-  <!-- CENTER: the lightbox -->
   <section class="center" aria-label="Image viewer">
     <div class="stage-wrap" id="stageWrap">
       <canvas id="stage" aria-label="SPHEREx image of the selected field"></canvas>
@@ -124,7 +121,6 @@
     </div>
   </section>
 
-  <!-- RIGHT: display -->
   <aside class="panel right" aria-label="Display settings" id="rightPanel">
     <h2>Display <button class="collapse" id="collapseRight" aria-label="Hide display settings">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></h2>
@@ -183,8 +179,8 @@
       <label class="check"><input type="checkbox" id="showDetections" checked> Changes found</label>
       <label class="check"><input type="checkbox" id="showCross" checked> Target position</label>
       <label class="check"><input type="checkbox" id="showFlags"> Flagged pixels in red</label>
-      <label class="check"><input type="checkbox" id="showGaia"> Gaia DR3 stars</label>
-      <label class="check"><input type="checkbox" id="showWise"> AllWISE sources</label>
+      <label class="check needs-api"><input type="checkbox" id="showGaia"> Gaia DR3 stars</label>
+      <label class="check needs-api"><input type="checkbox" id="showWise"> AllWISE sources</label>
       <label class="check" title="Only changes the picture: small groups of flagged pixels are filled from their neighbours. Saturated star cores are left alone."><input type="checkbox" id="repairChk" checked> Fill cosmic-ray hits</label>
       <label class="check"><input type="checkbox" id="smoothChk"> Smooth by 1 pixel</label>
     </section>
@@ -195,7 +191,6 @@
     </section>
   </aside>
 
-  <!-- BOTTOM: what the computer found -->
   <section class="panel bottom" aria-label="Results">
     <div class="res-col">
       <h2>Changes found <span class="count" id="detCount">0</span></h2>
@@ -227,7 +222,6 @@
   </section>
 </main>
 
-<!-- Dialogs -->
 <div class="modal hidden" id="modal-how" role="dialog" aria-modal="true" aria-labelledby="howTitle">
   <div class="modal-box prose">
     <button class="modal-close" data-close aria-label="Close">×</button>
@@ -240,6 +234,9 @@
       <li>Pixels hit by cosmic rays, dead pixels and saturated pixels are marked using the flags that come with each image. The glow from dust in the Solar System (zodiacal light) is subtracted.</li>
       <li>A program compares the frames and marks sources that move in a straight line, stars whose position drifts by at least 2.5″ a year, and stars whose brightness changes compared with their neighbours. It gives each one a score. The score is a hint, not a verdict.</li>
     </ol>
+    <h3>How the parts fit together</h3>
+    <p>The data comes first. Everything is built around SPHEREx's own image files (FITS), and the website is only the outer layer that shows the result. New data releases, a better detection model or a different website can each be swapped in without touching the rest.</p>
+    <img class="diagram" src="img/architecture.svg" alt="Diagram: SPHEREx FITS images in NASA's IRSA archive feed a Python pipeline, which writes one JSON file per object; the website reads those files. A machine-learning model, new data releases and other telescopes can plug into the pipeline.">
     <h3>Limits</h3>
     <p>One SPHEREx pixel covers 6.15″ of sky. In a year of data only the fastest nearby stars move by about one pixel. Very bright stars saturate the detector, and very faint objects are lost in the noise of a single image.</p>
     <p>SPHEREx has six detector arrays, each covering a different infrared wavelength range. A star can look brighter in one array than another simply because of its colour, so to look for brightness changes, compare frames from the same array.</p>
@@ -273,9 +270,20 @@
     <div id="aladinDiv" class="aladin"></div>
   </div>
 </div>
+<div class="modal hidden" id="modal-welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+  <div class="modal-box welcome">
+    <button class="modal-close" data-close aria-label="Close">×</button>
+    <h2 id="welcomeTitle">See the sky move</h2>
+    <p class="lede">NASA's SPHEREx telescope photographs the entire sky in infrared every six months. Between two photographs some things shift a little: asteroids, nearby stars, cold brown dwarfs. Some stars change brightness.</p>
+    <p>There are more than a billion objects in these images, far too many for scientists to check alone. This site lines the photographs up and plays them like a flip-book, so anyone can see what changed.</p>
+    <ul class="guides" id="guideList"></ul>
+    <button class="btn ghost skip" data-close>Explore on my own</button>
+  </div>
+</div>
 <div class="toast hidden" id="toast" role="status"></div>
 
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>
+<script src="js/guide.js"></script>
 </body>
 </html>

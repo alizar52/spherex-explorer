@@ -1,4 +1,3 @@
-/* SPHEREx Explorer — front-end (no build step, no dependencies). */
 (() => {
 'use strict';
 
@@ -7,10 +6,8 @@ const API = (CFG.apiBase || '').replace(/\/$/, '');
 const $ = (id) => document.getElementById(id);
 const PIX_ARCSEC = 6.15;
 const DET_RANGE = {1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.41], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00]};
-// detector arrays: a quiet ramp from short (cool grey-blue) to long wavelengths (warm grey)
 const DET_COLOR = {1: '#6E8FA3', 2: '#7A9AA0', 3: '#8FA393', 4: '#A8A385', 5: '#B39A80', 6: '#B48C82'};
 const KIND_COLOR = {moving: '#E5A03A', shifted: '#5CB3D6', variable: '#B98BDB', transient: '#939DA2'};
-// darker versions for marks drawn on the light 'plate' colour map
 const KIND_INK = {moving: '#B86E00', shifted: '#0F6E99', variable: '#7A3FA8', transient: '#55626A'};
 const KIND_LABEL = {moving: 'Moving object', shifted: 'Shifted position', variable: 'Brightness change', transient: 'Single-frame spot'};
 const KIND_EXPLAIN = {
@@ -20,7 +17,6 @@ const KIND_EXPLAIN = {
   transient: 'A bright spot in one frame only. Usually a cosmic-ray hit that the quality flags missed, but worth a look.',
 };
 
-// ------------------------------------------------------------------ state
 const S = {
   index: null, data: null, frames: [], view: [], det: 0, cur: 0, A: 0, B: 0,
   mode: 'timelapse', playing: false, timer: null, blinkShowB: false,
@@ -28,7 +24,6 @@ const S = {
   catalogs: {gaia: null, allwise: null}, scaleCache: new Map(), query: null,
 };
 
-// ------------------------------------------------------------------ utils
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function b64ToTyped(b64, Ctor) {
   const bin = atob(b64);
@@ -62,14 +57,13 @@ async function fetchJSON(url, opts = {}, timeoutMs = 120000) {
     const r = await fetch(url, {...opts, signal: ctl.signal});
     if (!r.ok) {
       let msg = `${r.status}`;
-      try { const j = await r.json(); msg = j.detail || msg; } catch (_) { /* ignore */ }
+      try { const j = await r.json(); msg = j.detail || msg; } catch (_) { msg = r.statusText || msg; }
       throw new Error(msg);
     }
     return await r.json();
   } finally { clearTimeout(t); }
 }
 
-// Parse "133.795 -7.245", "08h55m10.8s -07d14m42s", "08:55:10.8 -07:14:42"
 function parseCoords(text) {
   const raw = text.trim().replace(/[−–]/g, '-');
   if (!raw) return null;
@@ -91,7 +85,6 @@ function parseCoords(text) {
   return null;
 }
 
-// Gnomonic (TAN) projection around the frame centre
 function skyToPix(ra, dec, ra0, dec0, n) {
   const r = Math.PI / 180; const a = ra * r, d = dec * r, a0 = ra0 * r, d0 = dec0 * r;
   const cosc = Math.sin(d0) * Math.sin(d) + Math.cos(d0) * Math.cos(d) * Math.cos(a - a0);
@@ -110,14 +103,13 @@ function pixToSky(x, y, ra0, dec0, n) {
 }
 
 const ctr = () => (S.data.center || S.data.target);
-function targetXY(fr) {   // where the object of interest is in a given frame (pixels)
+function targetXY(fr) {
   const n = S.data.size; const tt = S.data.target_track;
   if (!tt || !tt.length) return {x: (n - 1) / 2, y: (n - 1) / 2};
   const t = (fr && tt.find((q) => q.frame === fr.id)) || tt[Math.floor(tt.length / 2)];
   return {x: t.x, y: t.y};
 }
 
-// ------------------------------------------------------------------ colour maps
 const CMAPS = {
   plate: [[227, 234, 236], [190, 201, 205], [120, 134, 140], [52, 63, 68], [16, 23, 26]],
   gray: [[0, 0, 0], [255, 255, 255]],
@@ -142,7 +134,6 @@ function drawColorbar() {
   $('cbar').style.background = `linear-gradient(90deg, ${stops.join(',')})`;
 }
 
-// ------------------------------------------------------------------ frame arrays
 function frameArr(fr, key) {
   const cacheKey = '_' + key;
   if (fr[cacheKey]) return fr[cacheKey];
@@ -168,8 +159,6 @@ function smooth(arr, n) {
   }
   return out;
 }
-// Display only: small groups of flagged pixels (cosmic-ray hits, dead pixels; up to 9 px) are replaced by
-// the median of the good pixels around them. Large flagged areas (saturated star cores) are left as they are.
 function repair(arr, bad, n) {
   const out = Float32Array.from(arr); const seen = new Uint8Array(n * n); const comp = []; const nb = [];
   for (let s0 = 0; s0 < n * n; s0++) {
@@ -194,7 +183,6 @@ function repair(arr, bad, n) {
   }
   return out;
 }
-// flagged pixels grown by one pixel: cosmic-ray hits spill a little into their neighbours
 function badGrown(fr, n) {
   if (fr._badG) return fr._badG; const bad = frameArr(fr, 'bad'); const g = new Uint8Array(n * n);
   for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
@@ -210,8 +198,6 @@ function layerOf(fr, layer) {
   const img = frameArr(fr, 'img'); const z = frameArr(fr, 'zodi'); let out;
   if (layer === 'image') out = img;
   else if (layer === 'clean') { out = new Float32Array(img.length); for (let i = 0; i < img.length; i++) out[i] = img[i] - (z ? z[i] : 0);
-    // the zodiacal model leaves a small constant offset that differs from frame to frame:
-    // remove each frame's median so that the time-lapse does not flicker
     const bad0 = frameArr(fr, 'bad'); const good = []; for (let i = 0; i < out.length; i++) if (!bad0[i] && isFinite(out[i])) good.push(out[i]);
     if (good.length > 20) { good.sort((p, q) => p - q); const med = good[good.length >> 1]; for (let i = 0; i < out.length; i++) out[i] -= med; }
     if ($('repairChk').checked) out = repair(out, bad0, n); }
@@ -262,7 +248,7 @@ function render(arr, n, diverging = false) {
   const cv = document.createElement('canvas'); cv.width = n; cv.height = n;
   const ctx = cv.getContext('2d'); const im = ctx.createImageData(n, n); const px = im.data;
   for (let y = 0; y < n; y++) {
-    const row = n - 1 - y; // north up: FITS row 0 is the bottom
+    const row = n - 1 - y;
     for (let x = 0; x < n; x++) {
       const v = arr[y * n + x]; const o = (row * n + x) * 4;
       if (!isFinite(v)) { px[o] = 46; px[o + 1] = 53; px[o + 2] = 58; px[o + 3] = 255; continue; }
@@ -286,9 +272,8 @@ function flagsCanvas(fr, n) {
   ctx.putImageData(im, 0, 0); return cv;
 }
 
-// ------------------------------------------------------------------ viewer
 const stage = $('stage'); const sctx = stage.getContext('2d');
-let panels = []; // [{x, y, s, frame, label}]
+let panels = [];
 
 function resizeStage() {
   const r = stage.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
@@ -351,8 +336,6 @@ function draw() {
   } else if (S.mode === 'stack') {
     const kind = document.querySelector('input[name=stackKind]:checked').value;
     const arrs = S.view.map((f) => layerOf(f)); const L = arrs[0].length; const out = new Float32Array(L);
-    // flagged pixels (cosmic rays etc.) are left out of the stack; where a pixel is flagged in
-    // every frame (saturated star core) all values are used
     const bads = $('layerSelect').value === 'quality' ? null : S.view.map((f) => badGrown(f, n));
     for (let i = 0; i < L; i++) {
       let sum = 0, cnt = 0, mx = -Infinity, sumA = 0, cntA = 0, mxA = -Infinity;
@@ -381,7 +364,6 @@ function draw() {
 
 function toScreen(p, x, y) { const n = S.data.size; return [p.x + (x + 0.5) * p.s, p.y + (n - 1 - y + 0.5) * p.s]; }
 
-// true when the image under the overlays is mostly light (plate map, difference, residual)
 function onLight() {
   return $('cmapSelect').value === 'plate' || S.mode === 'diff' ||
     (S.mode === 'stack' && document.querySelector('input[name=stackKind]:checked').value === 'resid');
@@ -391,14 +373,12 @@ function drawOverlays(p) {
   const n = S.data.size; const dpr = window.devicePixelRatio || 1; const ctx = sctx;
   ctx.save();
   ctx.beginPath(); ctx.rect(p.x, p.y, n * p.s, n * p.s); ctx.clip();
-  // crosshair on the requested position
   if ($('showCross').checked) {
     const tq = targetXY(p.frame); const [x, y] = toScreen(p, tq.x, tq.y); const r = 9 * dpr, g = 4 * dpr;
     ctx.strokeStyle = L ? 'rgba(15,110,153,.9)' : 'rgba(92,179,214,.9)'; ctx.lineWidth = 1.4 * dpr; ctx.beginPath();
     ctx.moveTo(x - r - g, y); ctx.lineTo(x - g, y); ctx.moveTo(x + g, y); ctx.lineTo(x + r + g, y);
     ctx.moveTo(x, y - r - g); ctx.lineTo(x, y - g); ctx.moveTo(x, y + g); ctx.lineTo(x, y + r + g); ctx.stroke();
   }
-  // catalog overlays
   const cats = [['gaia', $('showGaia').checked, L ? '#0F6E99' : '#5CB3D6'], ['allwise', $('showWise').checked, L ? '#B86E00' : '#E5A03A']];
   for (const [k, on, col] of cats) {
     const c = S.catalogs[k]; if (!on || !c || S.data.tracked) continue;
@@ -413,7 +393,6 @@ function drawOverlays(p) {
       ctx.stroke();
     }
   }
-  // detections
   if ($('showDetections').checked && S.data.detections) {
     const fid = p.frame ? p.frame.id : null;
     for (const d of S.data.detections) {
@@ -450,7 +429,6 @@ function drawOverlays(p) {
     }
   }
   ctx.restore();
-  // compass + scale bar
   const w = n * p.s; const bx = p.x + 10 * dpr, by = p.y + w - 12 * dpr; const bar = 60 / PIX_ARCSEC * p.s;
   const ink = L ? '#10171A' : '#DCE2E4'; ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 1.5 * dpr; ctx.font = `${11 * dpr}px ${FONT}`;
   if (bar < w * 0.6) { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bar, by); ctx.stroke(); ctx.fillText('1′', bx + bar / 2 - 4 * dpr, by - 5 * dpr); }
@@ -460,7 +438,6 @@ function drawOverlays(p) {
   if (p.tag && ['side', 'swipe', 'blink'].includes(S.mode)) { ctx.font = `700 ${13 * dpr}px ${FONT}`; ctx.fillStyle = L ? '#B86E00' : '#E5A03A'; ctx.fillText(p.tag, p.x + 8 * dpr, p.y + 18 * dpr); }
 }
 
-// pointer: pan, zoom, swipe, hover readout, click to select
 let drag = null;
 stage.addEventListener('pointerdown', (e) => {
   stage.setPointerCapture(e.pointerId);
@@ -525,7 +502,6 @@ function clickSelect(e) {
   if (best) selectDetection(best.id);
 }
 
-// ------------------------------------------------------------------ player & timeline
 function setFrame(i) {
   if (!S.view.length) return;
   S.cur = (i + S.view.length) % S.view.length;
@@ -545,7 +521,6 @@ function play(on) {
     }, 1000 / fps);
   }
 }
-// The plate strip: one real thumbnail per frame, in date order. It is the timeline and the frame picker.
 function buildTimeline() {
   const strip = $('strip'); strip.innerHTML = '';
   S.view.forEach((f, i) => {
@@ -578,7 +553,6 @@ function updateStrip() {
 }
 const updateTicks = updateStrip;
 
-// ------------------------------------------------------------------ panels
 function frameLabelShort(f, i) { return `${f.date.slice(0, 10)}, D${f.detector ?? '?'}, ${fmtNum(f.wavelength_um, 2)} µm`; }
 function applyFilter(keepFrameId) {
   const keep = keepFrameId || (curFrame() && curFrame().id);
@@ -630,13 +604,7 @@ function showNotes() {
   const html = notes.map((t) => `<p class="${/SYNTHETIC|not reliable|No clear source|too small/i.test(t) ? 'warn' : ''}">${t}</p>`).join('');
   $('notes').innerHTML = html;
 }
-function setSourceBadge() {
-  const b = $('sourceBadge'); const d = S.data;
-  b.className = 'badge ' + (d.demo ? 'demo' : /live/i.test(d.source) ? 'live' : 'real');
-  b.textContent = d.demo ? 'Synthetic test data' : /live/i.test(d.source) ? 'Live from IRSA' : 'Real SPHEREx images';
-}
 
-// detections list + inspector
 function buildDetList() {
   const ul = $('detList'); ul.innerHTML = ''; const dets = S.data.detections || [];
   $('detCount').textContent = dets.length;
@@ -700,7 +668,6 @@ function zoomTo(x, y, z) {
   const s = fit * z / dpr; S.panX = -((x + 0.5) - n / 2) * s; S.panY = ((y + 0.5) - n / 2) * s; draw();
 }
 
-// ------------------------------------------------------------------ charts
 function chartSVG(el, pts, xKey, yLabel, xFmt, xDomain) {
   const W = el.clientWidth || 300, H = el.clientHeight || 100; const m = {l: 44, r: 8, t: 6, b: 18};
   const good = pts.filter((p) => p.flux != null && isFinite(p.flux) && p[xKey] != null);
@@ -743,14 +710,13 @@ function jumpToFrame(id) {
   setFrame(i);
 }
 
-// ------------------------------------------------------------------ data loading
 function onData(data, opts = {}) {
   play(false);
   S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null;
   S.catalogs = {gaia: null, allwise: null}; S.zoom = 1; S.panX = S.panY = 0;
   if (opts.det != null && S.frames.some((f) => f.detector === opts.det)) S.det = opts.det; else S.det = 0;
   $('stageMsg').textContent = S.frames.length ? '' : 'SPHEREx has no images of this position yet.';
-  setSourceBadge(); showNotes(); buildDetList();
+  showNotes(); buildDetList();
   $('inspector').innerHTML = '<p class="muted">Pick a change from the list or click its circle on the image.</p>';
   applyFilter();
   if ($('showGaia').checked) loadCatalog('gaia');
@@ -774,8 +740,6 @@ function angDist(ra1, dec1, ra2, dec2) {
 }
 async function goCoords(ra, dec, name, opts = {}) {
   const fov = +$('fovSelect').value;
-  // prepared data at this position?
-  // prepared data that covers this position? (the object itself, or a prepared frame that contains the point)
   const hit = (S.index?.objects || []).filter((o) => !o.tracked).map((o) => ({o, d: angDist(o.ra, o.dec, ra, dec),
     dc: o.center_ra != null ? angDist(o.center_ra, o.center_dec, ra, dec) : Infinity}))
     .filter((q) => q.d < 30 || (q.o.size >= 24 && q.dc < 0.4 * q.o.size * PIX_ARCSEC)).sort((a, b) => a.d - b.d).map((q) => q.o)[0];
@@ -803,9 +767,8 @@ async function resolveName(name) {
     .find((o) => norm(o.name) === q || norm(o.slug || '') === q || (q.length >= 5 && norm(o.name).includes(q)));
   if (local) return local;
   if (S.apiOk) {
-    try { return await fetchJSON(`${API}/api/resolve?name=${encodeURIComponent(name)}`, {}, 25000); } catch (_) { /* fall through */ }
+    try { return await fetchJSON(`${API}/api/resolve?name=${encodeURIComponent(name)}`, {}, 25000); } catch (_) { S.resolveFailed = true; }
   }
-  // direct CDS Sesame call (works when the browser can reach CDS)
   const txt = await (await fetch(`https://cds.unistra.fr/cgi-bin/nph-sesame/-oI/SNV?${encodeURIComponent(name)}`)).text();
   const m = txt.match(/^%J\s+([\d.+-]+)\s+([\d.+-]+)/m); if (!m) throw new Error('not found');
   return {name, ra: +m[1], dec: +m[2]};
@@ -835,7 +798,6 @@ async function loadCatalog(cat) {
   draw();
 }
 
-// ------------------------------------------------------------------ modes, URL, misc
 let thumbTimer = null;
 function renderThumbsSoon() { clearTimeout(thumbTimer); thumbTimer = setTimeout(renderThumbs, 120); }
 function setMode(m) {
@@ -852,7 +814,7 @@ function updateURL() {
   else { p.set('ra', S.data.target.ra.toFixed(6)); p.set('dec', S.data.target.dec.toFixed(6)); p.set('fov', $('fovSelect').value); }
   if (S.det) p.set('det', S.det); if (S.mode !== 'timelapse') p.set('mode', S.mode);
   if (document.body.classList.contains('embed')) p.set('embed', '1');
-  try { history.replaceState(null, '', `${location.pathname}?${p}`); } catch (_) { /* sandboxed viewer */ }
+  try { history.replaceState(null, '', `${location.pathname}?${p}`); } catch (_) { return; }
 }
 function copyText(t, done = 'Copied') { navigator.clipboard?.writeText(t).then(() => toast(done), () => toast(t, 6000)); }
 function openModal(id) { $('modal-' + id).classList.remove('hidden'); }
@@ -873,8 +835,9 @@ async function openAladin() {
 }
 async function checkApi() {
   try { await fetchJSON(`${API}/api/health`, {}, 5000); S.apiOk = true; } catch (_) { S.apiOk = false; }
-  const b = $('apiBadge'); b.className = 'badge ' + (S.apiOk ? 'live' : 'dim');
-  b.textContent = S.apiOk ? 'Live search on' : 'Prepared objects only'; b.title = S.apiOk ? 'Any position can be searched in the IRSA archive' : 'The live search server is not running here, so only the objects in the list can be shown';
+  document.body.classList.toggle('no-api', !S.apiOk);
+  $('coordInput').placeholder = S.apiOk ? 'RA and Dec, or a name. For example 08h55m10.8s −07d14m42s, or 133.795 −7.245'
+    : 'Name of an object in the list, or its RA and Dec';
 }
 const GROUPS = [
   ['challenge', 'Challenge targets'],
@@ -923,7 +886,6 @@ async function loadIndex() {
   buildObjectList();
 }
 
-// ------------------------------------------------------------------ wire up UI
 function wire() {
   $('searchForm').addEventListener('submit', onSearch);
   $('objectFilter').addEventListener('input', buildObjectList);
@@ -996,10 +958,14 @@ async function init() {
     const first = S.index.objects.find((o) => o.class === 'challenge') || S.index.objects.find((o) => !o.demo) || S.index.objects[0];
     await loadStatic(first.slug);
   }
-  // play the first object once through on arrival, unless the visitor prefers less motion
   if (S.data && S.view.length > 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !p.get('mode')) {
     play(true); setTimeout(() => { if (S.playing) { play(false); setFrame(0); } }, 1000 / +$('speedSelect').value * S.view.length + 200);
   }
 }
-init();
+window.SPX = {
+  state: S, loadStatic, setMode, setFrame, play, selectDetection, draw,
+  setAB(a, b) { S.A = a; S.B = b; fillAB(); updateStrip(); draw(); },
+  setStack(kind) { const r = document.querySelector(`input[name=stackKind][value=${kind}]`); if (r) r.checked = true; draw(); },
+  ready: init(),
+};
 })();

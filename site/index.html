@@ -9,7 +9,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=20261114b">
+<link rel="stylesheet" href="css/app.css?v=20261114c">
 </head>
 <body>
 <header class="topbar">
@@ -99,6 +99,7 @@
         <label><input type="radio" name="stackKind" value="mean" checked> Average (less noise)</label>
         <label><input type="radio" name="stackKind" value="max"> Brightest pixel (movers leave a trail)</label>
         <label><input type="radio" name="stackKind" value="resid"> This frame minus the average</label>
+        <label><input type="radio" name="stackKind" value="rgb"> Colour picture: arrays D1–D2 blue, D3–D4 green, D5–D6 red</label>
       </div>
       <div class="player" id="player">
         <div class="transport">
@@ -180,8 +181,8 @@
       <label class="check"><input type="checkbox" id="showDetections" checked> Changes found</label>
       <label class="check"><input type="checkbox" id="showCross" checked> Target position</label>
       <label class="check"><input type="checkbox" id="showFlags"> Flagged pixels in red</label>
-      <label class="check needs-api"><input type="checkbox" id="showGaia"> Gaia DR3 stars</label>
-      <label class="check needs-api"><input type="checkbox" id="showWise"> AllWISE sources</label>
+      <label class="check"><input type="checkbox" id="showGaia"> Gaia DR3 stars</label>
+      <label class="check"><input type="checkbox" id="showWise"> AllWISE sources</label>
       <label class="check" title="Only changes the picture: small groups of flagged pixels are filled from their neighbours. Saturated star cores are left alone."><input type="checkbox" id="repairChk" checked> Fill cosmic-ray hits</label>
       <label class="check"><input type="checkbox" id="smoothChk"> Smooth by 1 pixel</label>
     </section>
@@ -208,11 +209,12 @@
       <div id="inspector" class="inspector"></div>
     </div>
     <div class="res-col charts">
-      <h2>Target brightness over time</h2>
+      <h2 id="lcTitle">Target brightness over time</h2>
       <p class="hint" id="photNote"></p>
       <div class="chart" id="lcChart"></div>
-      <h2>Target spectrum</h2>
-      <p class="hint">Each frame is taken at its own wavelength, so all frames together give a spectrum.</p>
+      <h2 id="specTitle">Target spectrum</h2>
+      <p class="hint" id="specNote">Each frame is taken at its own wavelength, so all frames together give a spectrum. Click any star on the image to measure its spectrum.</p>
+      <button class="btn small hidden" id="pickReset" type="button">Back to the target</button>
       <div class="chart" id="specChart"></div>
     </div>
     <div class="res-col">
@@ -283,8 +285,8 @@
 </div>
 <div class="toast hidden" id="toast" role="status"></div>
 
-<script src="js/config.js?v=20261114b"></script>
-<script src="js/app.js?v=20261114b"></script>
-<script src="js/guide.js?v=20261114b"></script>
+<script src="js/config.js?v=20261114c"></script>
+<script src="js/app.js?v=20261114c"></script>
+<script src="js/guide.js?v=20261114c"></script>
 </body>
 </html>

@@ -1,9 +1,10 @@
 """Build the JSON files the website reads (site/data).
 
 Usage:
-    python pipeline/build_static.py --metadata DATA/metadata.csv --fits-root DATA \
-        --challenge-dir DATA/nasa_demo --out site/data --fresh
+    python pipeline/build_static.py --folders PART1 PART2 ... --challenge-dir PART1 PART2 ... \
+        --out site/data --fresh
 
+--folders                dataset split over one or more folders: fits*/<class>/<object>/*.fits
 --metadata, --fits-root  team dataset; FITS files are matched by file name
 --challenge-dir          one sub-folder of FITS per challenge target
 --official               download the challenge targets from IRSA instead
@@ -37,6 +38,7 @@ OFFICIAL_TARGETS = [
      "note": "Two brown dwarfs, too close together for SPHEREx to separate. They move 4.7″ a year together with the star ε Indi A"},
     {"name": "WISE 0855−0714", "folder": "WISE_0855", "kind": "fast-moving brown dwarf",
      "ra": 133.795129, "dec": -7.245147, "epoch": 2010.4, "pmra": -8123.0, "pmdec": 673.0,
+     "detectors": [5, 6], "reference": "For comparison, the Spitzer telescope measured about 0.5 mJy at 4.5 µm (Luhman 2014)",
      "note": "The coordinates in the challenge (08h55m10.831s −07d14m42.53s) are where WISE saw it in 2010. "
              "It moves 8.1″ a year to the west, so by 2026 it is about 2′ away from that spot"},
     {"name": "RW Aurigae", "folder": "RW_Aur", "kind": "variable star (T Tauri)",
@@ -105,7 +107,62 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
         if only and r["name"] not in only:
             continue
         groups[(r.get("class", ""), r["name"])].append(r)
-    idx = index_fits(fits_root)
+    return build_objects(groups, index_fits(fits_root), out, size, demo)
+
+
+def scan_folders(roots: list[Path]) -> dict:
+    """FITS laid out as <root>/fits*/<class>/<object>/*.fits, possibly split over several roots."""
+    found = defaultdict(dict)
+    for root in roots:
+        for p in root.glob("fits*/*/*/*.fits"):
+            cls = p.parent.parent.name.removesuffix("_nasa")
+            found[(cls, p.parent.name)][p.name] = p
+    return found
+
+
+def quality_flags(roots: list[Path]) -> dict:
+    flags = {}
+    for root in roots:
+        q = root / "catalogs" / "quality_report.csv"
+        if q.exists():
+            for r in csv.DictReader(open(q, newline="", encoding="utf-8")):
+                flags[Path(r["file"]).name] = r.get("warnings", "")
+    return flags
+
+
+def build_folders(roots: list[Path], out: Path, size: int | None = None,
+                  only: list[str] | None = None) -> list[dict]:
+    """Dataset without a metadata table: object centres come from the cutout WCS."""
+    challenge = {t["folder"].lower() for t in OFFICIAL_TARGETS}
+    flags = quality_flags(roots)
+    groups, idx = {}, {}
+    for (cls, name), files in sorted(scan_folders(roots).items()):
+        if name.lower() in challenge or (only and name not in only):
+            continue
+        paths = [p for f, p in sorted(files.items()) if "reference_coordinate_outside_cutout" not in flags.get(f, "")]
+        info = {p: cutout_info(p) for p in paths}
+        # cutouts cut off by a detector edge come out smaller; the usual size is the full one
+        sizes = [i[2] for i in info.values()]
+        full = max(set(sizes), key=sizes.count) if sizes else 0
+        if cls == "moving":
+            paths = [p for p in paths if info[p][2] >= full]
+        else:
+            ref = [i for i in info.values() if i[2] >= full]
+            ra_c, dec_c = float(np.median([i[0] for i in ref])), float(np.median([i[1] for i in ref]))
+        rows = []
+        for p in paths:
+            ra, dec, _, mjd = info[p]
+            if cls != "moving":
+                ra, dec = ra_c, dec_c
+            rows.append({"name": name, "class": cls, "file": p.name, "ra_deg": ra, "dec_deg": dec,
+                         "epoch_mjd": mjd, "label_status": "folder"})
+            idx[p.name] = p
+        if rows:
+            groups[(cls, name)] = rows
+    return build_objects(groups, idx, out, size)
+
+
+def build_objects(groups: dict, idx: dict, out: Path, size: int | None = None, demo: bool = False) -> list[dict]:
     (out / "targets").mkdir(parents=True, exist_ok=True)
     entries = []
     for (cls, name), rs in sorted(groups.items()):
@@ -147,8 +204,8 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
                                  f"The images were centred on its catalogue position from years ago, and the star has "
                                  f"moved since then. Measurements here follow the star, not the old position.")
             else:
-                notes.append("There is no clear star in these small images. It has either moved out of the 12-pixel "
-                             "square since its catalogue position was measured, or it is so bright that its centre is saturated.")
+                notes.append(f"There is no clear star in these images. It has either moved out of the {n}-pixel "
+                             f"square since its catalogue position was measured, or it is so bright that its centre is saturated.")
         if n < 24:
             notes.append(f"These images are only {n}×{n} pixels ({n * sx.PIXSCALE_ARCSEC / 60:.1f}′ across), too small to "
                          f"search for moving objects. Only the brightness of the central object is checked.")
@@ -165,12 +222,16 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
             for i, d in enumerate(payload["detections"]):
                 d["id"] = f"C{i + 1:03d}"
         if tracked:
+            tt = payload["target_track"]
+            found = sum(t["measured"] for t in tt)
             payload["detections"] = [{
                 "id": "C001", "kind": "moving", "x": c, "y": c, "ra": ra0, "dec": dec0, "name": shown,
-                "frames": [f.id for f in frames], "track": [{"frame": f.id, "x": c, "y": c} for f in frames],
+                "frames": [t["frame"] for t in tt],
+                "track": [{"frame": t["frame"], "x": t["mx"], "y": t["my"]} for t in tt],
                 "snr": None, "confidence": None,
-                "note": "A known asteroid. Its position comes from its predicted orbit, which was used to centre the "
-                        "frames. It was not measured from the images."}]
+                "note": f"A known asteroid. Each frame is centred on where its orbit predicts it to be. The circle follows "
+                        f"the brightest spot near the centre, found in {found} of {len(tt)} frames. The few pixels between "
+                        f"the prediction and that spot come from the timing of the prediction, not from the asteroid."}]
         slug = slugify(name)
         (out / "targets" / f"{slug}.json").write_text(json.dumps(payload, separators=(",", ":")))
         entries.append({"slug": slug, "name": shown, "class": cls, "ra": ra0, "dec": dec0, "size": n,
@@ -209,31 +270,41 @@ def describe_target(t: dict, payload: dict) -> None:
             "snr": z, "confidence": None, "speed_arcsec_per_day": None,
             "note": (f"Too faint for the automatic search to find in single images. Measuring exactly where the catalogue "
                      f"says it should be gives {s['mean_flux_mjy']} mJy on average over {s['frames_used']} frames"
+                     + (f" from arrays {' and '.join('D%d' % k for k in s['detectors'])} "
+                        f"({sx.DETECTORS[s['detectors'][0]][0]}–{sx.DETECTORS[s['detectors'][-1]][1]} µm), "
+                        f"the only wavelengths where it gives off enough light" if s.get("detectors") else "")
                      + (f", {z} times the spread of the same measurement at {s['random_positions']} random spots in this field"
                         if z is not None else "")
                      + (f". {s['fraction_random_brighter'] * 100:.0f}% of those random spots are at least as bright"
                         if s.get("fraction_random_brighter") is not None else "")
+                     + (f". {t['reference']}" if t.get("reference") else "")
                      + f". It should only shift {shift:.1f} pixels across these frames, so the images alone cannot "
                        f"show that this faint smudge is the moving brown dwarf.")})
 
 
-def build_challenge(folder: Path, out: Path, size: int | None = None) -> list[dict]:
+def build_challenge(folders: list[Path], out: Path, size: int | None = None) -> list[dict]:
     (out / "targets").mkdir(parents=True, exist_ok=True)
-    dirs = {p.name.lower(): p for p in folder.rglob("*") if p.is_dir()}
+    flags = quality_flags(folders)
     entries = []
     for t in OFFICIAL_TARGETS:
-        d = dirs.get(t["folder"].lower())
-        paths = sorted(d.glob("*.fits")) if d else []
+        files = {}
+        for folder in folders:
+            for d in folder.rglob("*"):
+                if d.is_dir() and d.name.lower() == t["folder"].lower():
+                    files.update({p.name: p for p in d.glob("*.fits")})
+        paths = [p for f, p in sorted(files.items()) if "reference_coordinate_outside_cutout" not in flags.get(f, "")]
         if not paths:
-            print(f"- {t['name']}: folder '{t['folder']}' not found in {folder}")
+            print(f"- {t['name']}: folder '{t['folder']}' not found")
             continue
         info = [cutout_info(p) for p in paths]
-        ra_c, dec_c = float(np.mean([i[0] for i in info])), float(np.mean([i[1] for i in info]))
-        n = size or int(np.median([i[2] for i in info]))
+        full = max(i[2] for i in info)
+        ref = [i for i in info if i[2] == full]
+        ra_c, dec_c = float(np.median([i[0] for i in ref])), float(np.median([i[1] for i in ref]))
+        n = size or full
         frames = [f for f in (load_frame(p, ra_c, dec_c, n) for p in paths) if f is not None]
         payload = sx.build_payload(frames, round(ra_c, 6), round(dec_c, 6), n, name=t["name"],
                                    source="team download (IRSA SPHEREx cutouts)", notes=[],
-                                   target={k: t[k] for k in ("name", "ra", "dec", "epoch", "pmra", "pmdec") if k in t},
+                                   target={k: t[k] for k in ("name", "ra", "dec", "epoch", "pmra", "pmdec", "detectors") if k in t},
                                    extra={"class_label": "challenge", "demo": False, "kind_text": t["kind"]})
         describe_target(t, payload)
         slug = slugify(t["name"])
@@ -294,7 +365,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--metadata", type=Path, help="team dataset metadata.csv")
     ap.add_argument("--fits-root", type=Path, help="folder that contains the dataset FITS files")
-    ap.add_argument("--challenge-dir", type=Path, help="folder with sub-folders of FITS for the challenge targets")
+    ap.add_argument("--challenge-dir", type=Path, nargs="+", help="folder(s) with sub-folders of FITS for the challenge targets")
+    ap.add_argument("--folders", type=Path, nargs="+",
+                    help="dataset folder(s) laid out as fits*/<class>/<object>/*.fits, no metadata needed")
     ap.add_argument("--official", action="store_true", help="fetch the challenge targets live from IRSA")
     ap.add_argument("--out", default=Path(__file__).resolve().parents[1] / "site" / "data", type=Path)
     ap.add_argument("--size", type=int, help="frame size in px (default: size of the cutouts)")
@@ -302,13 +375,15 @@ if __name__ == "__main__":
     ap.add_argument("--demo", action="store_true", help="mark dataset output as synthetic demo data")
     ap.add_argument("--fresh", action="store_true", help="start a new index instead of merging into the old one")
     a = ap.parse_args()
-    if not (a.metadata or a.challenge_dir or a.official):
-        ap.error("nothing to do: give --metadata/--fits-root, --challenge-dir and/or --official")
+    if not (a.metadata or a.challenge_dir or a.official or a.folders):
+        ap.error("nothing to do: give --folders, --metadata/--fits-root, --challenge-dir and/or --official")
     ents = []
     if a.challenge_dir:
         ents += build_challenge(a.challenge_dir, a.out, a.size)
     if a.official:
         ents += build_official_live(a.out, a.size or 64)
+    if a.folders:
+        ents += build_folders(a.folders, a.out, a.size, a.only)
     if a.metadata:
         if not a.fits_root:
             ap.error("--fits-root is required with --metadata")

@@ -39,7 +39,10 @@ FLAG_NAMES = {0: "TRANSIENT", 1: "OVERFLOW", 2: "SUR_ERROR", 4: "PHANTOM", 5: "R
               15: "NONLINEAR", 17: "PERSIST", 19: "OUTLIER", 21: "SOURCE", 26: "BLOOM"}
 BAD_BITS = [0, 1, 2, 6, 7, 9, 10, 11, 15]
 BAD_MASK = sum(1 << b for b in BAD_BITS)
+SAT_MASK = (1 << 1) | (1 << 15)
 MIN_PM_ARCSEC_YR = 2.5
+MAX_LINK_DAYS = 5.0
+MAX_FLASHES = 3
 
 
 def detector_from_name(name: str | None) -> int | None:
@@ -60,6 +63,8 @@ def detector_from_wavelength(wl: float | None) -> int | None:
 
 
 def b64(arr: np.ndarray, dtype) -> str:
+    if dtype == np.float16:
+        arr = np.clip(arr, -65000, 65000)
     return base64.b64encode(np.ascontiguousarray(arr, dtype=dtype).tobytes()).decode()
 
 
@@ -97,6 +102,7 @@ class Frame:
     bad: np.ndarray
     meta: dict = field(default_factory=dict)
     image_masked: np.ndarray | None = None
+    saturated: np.ndarray | None = None
 
     @property
     def clean(self) -> np.ndarray:
@@ -152,11 +158,13 @@ def process_hdul(hdul: fits.HDUList, ra: float, dec: float, size_px: int,
         return None
 
     fl_hdu = _ext(hdul, "FLAGS")
-    image_masked = None
+    image_masked = saturated = None
     if fl_hdu is not None and fl_hdu.data is not None:
         badsrc = (np.asarray(fl_hdu.data).astype(np.int64) & BAD_MASK) != 0
         bad = ndimage.map_coordinates(badsrc.astype(float), coords, order=1, mode="constant", cval=1.0) > 0.15
         image_masked = resample(np.where(badsrc, np.nan, data))
+        satsrc = (np.asarray(fl_hdu.data).astype(np.int64) & SAT_MASK) != 0
+        saturated = ndimage.map_coordinates(satsrc.astype(float), coords, order=1, mode="constant", cval=0.0) > 0.15
     else:
         bad = np.zeros_like(image, dtype=bool)
     bad |= ~np.isfinite(image)
@@ -204,7 +212,8 @@ def process_hdul(hdul: fits.HDUList, ra: float, dec: float, size_px: int,
                 flag_counts[fname] = c
     meta["flag_counts"] = flag_counts
     return Frame(id=frame_id, mjd=float(mjd), detector=det, wavelength_um=wl, bandwidth_um=bw,
-                 image=image, zodi=zodi, noise=noise, bad=bad, meta=meta, image_masked=image_masked)
+                 image=image, zodi=zodi, noise=noise, bad=bad, meta=meta, image_masked=image_masked,
+                 saturated=saturated)
 
 
 def aperture_flux(frame: Frame, x: float, y: float, r: float = 2.0,
@@ -298,26 +307,216 @@ def _ap(im, noise, bad, x, y, r=2.0):
     return f, e
 
 
+def _psf_like(img: np.ndarray, x: float, y: float) -> bool:
+    """False for a spike that sits in one pixel, as left by a cosmic-ray hit."""
+    ix, iy = int(round(x)), int(round(y))
+    box = img[max(iy - 1, 0):iy + 2, max(ix - 1, 0):ix + 2]
+    ring = img[max(iy - 4, 0):iy + 5, max(ix - 4, 0):ix + 5]
+    if box.size < 9 or not np.isfinite(box).all():
+        return False
+    flux = box - np.nanmedian(ring)
+    total = float(flux.sum())
+    return total > 0 and float(flux.max()) / total < 0.5
+
+
+def _proper_motions(frames: list[Frame], edge: int) -> list[dict]:
+    """Sources whose centroid drifts linearly in time. Uses every frame, whatever the detector:
+    all frames sit on the same sky grid, so positions can be compared across wavelengths."""
+    frames = sorted(frames, key=lambda g: g.mjd)
+    if len(frames) < 4:
+        return []
+    n = frames[0].image.shape[0]
+    clean = [g.clean for g in frames]
+    raw = [g.image - (g.zodi if g.zodi is not None else 0.0) for g in frames]
+    snr = []
+    for c in raw:
+        sm = _nan_smooth(c, 1.0)
+        s = robust_sigma(sm)
+        snr.append(sm / s if np.isfinite(s) and s > 0 else np.full_like(sm, np.nan))
+    with np.errstate(all="ignore"):
+        ref = np.nanmedian(np.array(snr), axis=0)
+    out = []
+    yy, xx = np.mgrid[0:n, 0:n]
+    for (sx0, sy0, _) in _peaks(ref, 8.0, min_sep=3, edge=edge):
+        near = np.hypot(xx - sx0, yy - sy0) <= 2.0
+        cents = []
+        for g, c, r, z in zip(frames, clean, raw, snr):
+            iy, ix = int(round(sy0)), int(round(sx0))
+            if not np.isfinite(z[iy, ix]) or z[iy, ix] < 5:
+                continue
+            cc = _centroid(r, sx0, sy0)
+            if cc is None or math.hypot(cc[0] - sx0, cc[1] - sy0) > 3:
+                continue
+            cents.append((g, cc[0], cc[1]))
+        if len(cents) < 4:
+            continue
+        t = np.array([c[0].mjd for c in cents]) / 365.25
+        xs = np.array([c[1] for c in cents]); ys = np.array([c[2] for c in cents])
+        if np.ptp(t) < 0.05:
+            continue
+        keep = np.ones(len(t), bool)
+        for _ in range(max(3, len(t) // 4)):
+            tt = t[keep] - t[keep].mean()
+            A = np.c_[tt, np.ones_like(tt)]
+            (vx, x0), *_ = np.linalg.lstsq(A, xs[keep], rcond=None)
+            (vy, y0), *_ = np.linalg.lstsq(A, ys[keep], rcond=None)
+            res = np.hypot(xs[keep] - (vx * tt + x0), ys[keep] - (vy * tt + y0))
+            rms = float(np.sqrt(np.mean(res ** 2)))
+            if rms < 0.25 or keep.sum() < 6:
+                break
+            keep[np.flatnonzero(keep)[np.argmax(res)]] = False
+        tt = t[keep] - t[keep].mean()
+        rms = max(rms, 0.1)
+        speed = math.hypot(vx, vy) * PIXSCALE_ARCSEC
+        disp = math.hypot(vx, vy) * np.ptp(t[keep])
+        zv = math.hypot(vx, vy) / (rms / math.sqrt(max(np.sum(tt ** 2), 1e-9)))
+        epochs = len(np.unique(np.round(t[keep] * 365.25 / 20)))
+        if (zv > 6 and keep.sum() >= 6 and epochs >= 3 and rms < (0.5 if keep.sum() >= 8 else 0.3)
+                and disp > 0.5 and speed >= MIN_PM_ARCSEC_YR):
+            kept = [c for c, k in zip(cents, keep) if k]
+            out.append(dict(kind="shifted", x=float(x0), y=float(y0), snr=float(zv),
+                            track=[{"frame": c[0].id, "x": c[1], "y": c[2]} for c in kept],
+                            frames=[c[0].id for c in kept],
+                            motion_arcsec_per_year=round(speed, 2),
+                            motion_east_arcsec_per_year=round(-vx * PIXSCALE_ARCSEC, 2),
+                            motion_north_arcsec_per_year=round(vy * PIXSCALE_ARCSEC, 2),
+                            displacement_px=round(disp, 2), fit_rms_px=round(rms, 3)))
+    return out
+
+
+def _obsid(fid: str) -> str | None:
+    m = re.search(r"level2_(.+?)D\d_spx", fid)
+    return m.group(1) if m else None
+
+
+def _partner(g: "Frame", frames: list) -> "Frame | None":
+    """The frame taken in the same exposure by the other focal plane.
+    SPHEREx splits the light with a dichroic: arrays D1-D3 and D4-D6 see the same sky at the same moment."""
+    if g.detector is None:
+        return None
+    ob, want = _obsid(g.id), g.detector + 3 if g.detector <= 3 else g.detector - 3
+    for f in frames:
+        if f is not g and f.detector == want and _obsid(f.id) == ob:
+            return f
+    return None
+
+
+def _seen_in_partner(g, x, y, frames, zmaps, r: float = 1.5, zmin: float = 4.0) -> bool:
+    """A cosmic-ray hit lands on one array only; a real flash shows in both at the same spot."""
+    p = _partner(g, frames)
+    if p is None or p.id not in zmaps:
+        return False
+    z = zmaps[p.id]
+    n = z.shape[0]
+    yy, xx = np.mgrid[0:n, 0:n]
+    near = np.hypot(xx - x, yy - y) <= r
+    v = z[near]
+    v = v[np.isfinite(v)]
+    return v.size > 0 and float(v.max()) > zmin
+
+
+def _pair_change(meas, mi, group, i, j):
+    """Brightness change of source mi between frames i and j, against the other stars in the field."""
+    m = meas[mi]
+    if i not in m["fluxes"] or j not in m["fluxes"]:
+        return None
+    wi, wj = group[i].wavelength_um, group[j].wavelength_um
+    dw = abs(wi - wj) / max(wi, wj) if wi and wj else 0.0
+    if dw > 0.025:
+        return None
+    (fi, ei), (fj, ej) = m["fluxes"][i], m["fluxes"][j]
+    comp = [math.log(o["fluxes"][i][0] / o["fluxes"][j][0]) for oi, o in enumerate(meas)
+            if oi != mi and i in o["fluxes"] and j in o["fluxes"]]
+    if len(comp) >= 4:
+        zero = float(np.median(comp))
+        scat = max(1.4826 * float(np.median(np.abs(np.array(comp) - zero))), 0.03)
+    elif dw <= 0.01:
+        zero, scat = 0.0, 0.08
+    else:
+        return None
+    dln = math.log(fi / fj) - zero
+    z = abs(dln) / math.sqrt(scat ** 2 + (ei / fi) ** 2 + (ej / fj) ** 2)
+    return z, dln, len(comp)
+
+
+def _variables(groups: dict, nsig: float) -> list[dict]:
+    """Stars whose brightness changes. A cosmic-ray hit can make one frame look bright, so the change
+    must either remain with the brightest frame left out, or show in both focal planes
+    (the same two exposures seen by arrays D1-D3 and D4-D6)."""
+    allframes = [f for g, _ in groups.values() for f in g]
+    out = []
+    for det, (group, meas) in groups.items():
+        for mi, m in enumerate(meas):
+            if m.get("shifted"):
+                continue
+            ks = sorted(m["fluxes"])
+            cands = []
+            for a_i in range(len(ks)):
+                for b_i in range(a_i + 1, len(ks)):
+                    i, j = ks[a_i], ks[b_i]
+                    r = _pair_change(meas, mi, group, i, j)
+                    if not r:
+                        continue
+                    z, dln, ncomp = r
+                    amp = math.exp(abs(dln))
+                    if z > nsig and amp > (1.25 if ncomp >= 4 else 1.3):
+                        cands.append((z, i, j, amp, dln, ncomp))
+            best = None
+            for z, i, j, amp, dln, ncomp in sorted(cands, reverse=True):
+                hi = i if dln > 0 else j
+                if any(c[1] != hi and c[2] != hi for c in cands):
+                    # still changes with the brightest frame left out, so not one cosmic-ray hit
+                    best = (z, i, j, amp, dln, ncomp)
+                    break
+                pi, pj = _partner(group[i], allframes), _partner(group[j], allframes)
+                if pi is None or pj is None or pi.detector not in groups:
+                    continue
+                pgroup, pmeas = groups[pi.detector]
+                ki, kj = pgroup.index(pi), pgroup.index(pj)
+                pm = [k for k, o in enumerate(pmeas) if math.hypot(o["x"] - m["x"], o["y"] - m["y"]) < 2.0]
+                if not pm:
+                    continue
+                r = _pair_change(pmeas, pm[0], pgroup, ki, kj)
+                if r is None:
+                    continue
+                pz, pd, _ = r
+                if pd * dln > 0 and pz > 3:
+                    best = (z, i, j, amp, dln, ncomp)
+                    break
+            if best:
+                z, i, j, amp, dln, ncomp = best
+                hi, lo = (group[i], group[j]) if dln > 0 else (group[j], group[i])
+                out.append(dict(kind="variable", x=m["x"], y=m["y"], snr=float(z),
+                                track=[{"frame": group[k].id, "x": m["x"], "y": m["y"]} for k in ks],
+                                frames=[group[k].id for k in ks], amplitude_ratio=round(amp, 2),
+                                brightest_frame=hi.id, faintest_frame=lo.id, comparison_stars=ncomp))
+    return out
+
+
 def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
     """Find changes between frames of the same detector array.
 
     moving     new source on a straight line through at least three frames
     shifted    known source whose centroid drifts linearly in time (proper motion)
     variable   known source whose flux ratio to the field stars changes
-    transient  strong source in a single frame only
+    transient  strong source in one exposure only, seen by both focal planes (D1-D3 and D4-D6)
 
     confidence is a heuristic score between 0 and 1.
     """
     if len(frames) < 2:
         return []
     n = frames[0].image.shape[0]
-    edge = 4 if n >= 24 else 2
+    edge = 7 if n >= 48 else 4 if n >= 24 else 2
     by_det: dict = {}
     for f in frames:
         by_det.setdefault(f.detector, []).append(f)
 
     fresh = []
-    dets: list[dict] = []
+    zmaps: dict = {}
+    groups: dict = {}
+    srcmask = np.zeros((n, n), bool)
+    pms = _proper_motions(frames, edge)
+    dets: list[dict] = list(pms)
     for det, group in by_det.items():
         if len(group) < 2:
             continue
@@ -347,88 +546,32 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             meas.append(dict(x=sx0, y=sy0, cents=cents, fluxes=fluxes))
 
         for m in meas:
-            cents = m["cents"]
-            if len(cents) < 4:
-                continue
-            t = np.array([c[0].mjd for c in cents]) / 365.25
-            xs = np.array([c[1] for c in cents]); ys = np.array([c[2] for c in cents])
-            if np.ptp(t) < 0.05:
-                continue
-            keep = np.ones(len(t), bool)
-            for _ in range(2):
-                tt = t[keep] - t[keep].mean()
-                A = np.c_[tt, np.ones_like(tt)]
-                (vx, x0), *_ = np.linalg.lstsq(A, xs[keep], rcond=None)
-                (vy, y0), *_ = np.linalg.lstsq(A, ys[keep], rcond=None)
-                res = np.hypot(xs[keep] - (vx * tt + x0), ys[keep] - (vy * tt + y0))
-                rms = float(np.sqrt(np.mean(res ** 2)))
-                if rms < 0.25 or keep.sum() < 6 or not keep.all():
-                    break
-                keep[np.flatnonzero(keep)[np.argmax(res)]] = False
-            rms = max(rms, 0.03)
-            speed = math.hypot(vx, vy) * PIXSCALE_ARCSEC
-            disp = math.hypot(vx, vy) * np.ptp(t[keep])
-            zv = math.hypot(vx, vy) / (rms / math.sqrt(max(np.sum(tt ** 2), 1e-9)))
-            if zv > 6 and rms < 0.25 and disp > 0.25 and speed >= MIN_PM_ARCSEC_YR:
-                kept = [c for c, k in zip(cents, keep) if k]
+            if any(math.hypot(m["x"] - d["x"], m["y"] - d["y"]) < 2.5 for d in pms):
                 m["shifted"] = True
-                dets.append(dict(kind="shifted", x=float(x0), y=float(y0), snr=float(zv),
-                                 track=[{"frame": c[0].id, "x": c[1], "y": c[2]} for c in kept],
-                                 frames=[c[0].id for c in kept],
-                                 motion_arcsec_per_year=round(speed, 2),
-                                 motion_east_arcsec_per_year=round(-vx * PIXSCALE_ARCSEC, 2),
-                                 motion_north_arcsec_per_year=round(vy * PIXSCALE_ARCSEC, 2),
-                                 displacement_px=round(disp, 2), fit_rms_px=round(rms, 3)))
 
-        for mi, m in enumerate(meas):
-            if m.get("shifted"):
-                continue
-            best = None
-            ks = sorted(m["fluxes"])
-            for a_i in range(len(ks)):
-                for b_i in range(a_i + 1, len(ks)):
-                    i, j = ks[a_i], ks[b_i]
-                    wi, wj = group[i].wavelength_um, group[j].wavelength_um
-                    dw = abs(wi - wj) / max(wi, wj) if wi and wj else 0.0
-                    if dw > 0.025:
-                        continue
-                    (fi, ei), (fj, ej) = m["fluxes"][i], m["fluxes"][j]
-                    comp = [math.log(o["fluxes"][i][0] / o["fluxes"][j][0]) for oi, o in enumerate(meas)
-                            if oi != mi and i in o["fluxes"] and j in o["fluxes"]]
-                    if len(comp) >= 4:
-                        zero = float(np.median(comp))
-                        scat = max(1.4826 * float(np.median(np.abs(np.array(comp) - zero))), 0.03)
-                    elif dw <= 0.01:
-                        zero, scat = 0.0, 0.08
-                    else:
-                        continue
-                    dln = math.log(fi / fj) - zero
-                    z = abs(dln) / math.sqrt(scat ** 2 + (ei / fi) ** 2 + (ej / fj) ** 2)
-                    amp = math.exp(abs(dln))
-                    if z > nsig and amp > (1.25 if len(comp) >= 4 else 1.3) and (best is None or z > best[0]):
-                        best = (z, i, j, amp, dln, len(comp))
-            if best:
-                z, i, j, amp, dln, ncomp = best
-                hi, lo = (group[i], group[j]) if dln > 0 else (group[j], group[i])
-                dets.append(dict(kind="variable", x=m["x"], y=m["y"], snr=float(z),
-                                 track=[{"frame": group[k].id, "x": m["x"], "y": m["y"]} for k in ks],
-                                 frames=[group[k].id for k in ks], amplitude_ratio=round(amp, 2),
-                                 brightest_frame=hi.id, faintest_frame=lo.id, comparison_stars=ncomp))
+        groups[det] = (group, meas)
 
-        refmask = ref / rsig > 5
-        refmask = ndimage.binary_dilation(refmask, iterations=2)
+        refmask = ndimage.binary_dilation(ref / rsig > 5, iterations=2)
+        srcmask |= refmask
+        if len(group) < 3:
+            continue
         for i, g in enumerate(group):
             others = np.delete(sm, i, axis=0)
             r = np.nanmedian(others, axis=0) if len(others) > 1 else others[0]
             resid = sm[i] - r
+            resid = resid - np.nanmedian(resid)  # frames can differ by a constant background offset
             sig = robust_sigma(resid)
             if not np.isfinite(sig) or sig <= 0:
                 continue
             z = resid / np.sqrt(sig ** 2 + (0.15 * np.abs(np.nan_to_num(r))) ** 2)
             z = np.where(ndimage.binary_dilation(g.bad, iterations=1), np.nan, z)
+            zmaps[g.id] = z
             for (x, y, zz) in _peaks(z, nsig, min_sep=3, edge=edge):
-                fresh.append((g, x, y, zz, bool(refmask[int(round(y)), int(round(x))])))
+                fresh.append((g, x, y, zz))
 
+    dets += _variables(groups, nsig)
+
+    fresh = [(g, x, y, zz, bool(srcmask[int(round(y)), int(round(x))])) for g, x, y, zz in fresh]
     fresh.sort(key=lambda p: p[0].mjd)
     taken = set()
     for a in range(len(fresh)):
@@ -441,7 +584,7 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
             if b in taken or B[0] is A[0] or B[0].mjd <= A[0].mjd:
                 continue
             dt = B[0].mjd - A[0].mjd
-            if math.hypot(B[1] - A[1], B[2] - A[2]) < 1.0:
+            if dt < 0.02 or dt > MAX_LINK_DAYS or math.hypot(B[1] - A[1], B[2] - A[2]) < 1.0:
                 continue
             vx, vy = (B[1] - A[1]) / dt, (B[2] - A[2]) / dt
             chain = [a, b]
@@ -451,6 +594,8 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                 if c in chain or c in taken or C[0].id in used_frames:
                     continue
                 tt = C[0].mjd - A[0].mjd
+                if abs(tt) > MAX_LINK_DAYS or any(abs(C[0].mjd - fresh[k][0].mjd) < 0.02 for k in chain):
+                    continue
                 if math.hypot(A[1] + vx * tt - C[1], A[2] + vy * tt - C[2]) < 1.5:
                     chain.append(c)
                     used_frames.add(C[0].id)
@@ -469,8 +614,11 @@ def detect_changes(frames: list[Frame], nsig: float = 6.0) -> list[dict]:
                              speed_arcsec_per_day=round(speed, 1),
                              _path=[(pts[0][1] + bvx * (f.mjd - pts[0][0].mjd), pts[0][2] + bvy * (f.mjd - pts[0][0].mjd))
                                     for f in frames]))
-    for k, (g, x, y, zz, on_src) in enumerate(fresh):
-        if k not in taken and not on_src and zz > nsig + 4:
+    flashes = 0
+    for k, (g, x, y, zz, on_src) in sorted(enumerate(fresh), key=lambda e: -e[1][3]):
+        if k not in taken and not on_src and zz > nsig + 4 and _psf_like(g.clean, x, y) and flashes < MAX_FLASHES \
+                and _seen_in_partner(g, x, y, frames, zmaps):
+            flashes += 1
             dets.append(dict(kind="transient", x=x, y=y, snr=float(zz), frames=[g.id],
                              track=[{"frame": g.id, "x": x, "y": y}]))
 
@@ -573,13 +721,27 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
         if target:
             px, py = (float(v) for v in w.all_world2pix([predict_position(target, f.mjd)], 0)[0])
         mx, my, recentred = px, py, False
-        if not tracked:
-            cc = _centroid(f.image - (f.zodi if f.zodi is not None else 0.0), px, py)
-            if cc and math.hypot(cc[0] - px, cc[1] - py) <= 2.5:
-                t = aperture_flux(f, cc[0], cc[1])
-                if t["flux"] is not None and t["err"] and t["flux"] / t["err"] > 8:
-                    mx, my, recentred = cc[0], cc[1], True
+        sky = f.image - (f.zodi if f.zodi is not None else 0.0)
+        sx0, sy0 = px, py
+        if tracked:
+            yy, xx = np.mgrid[0:size_px, 0:size_px]
+            disk = np.hypot(xx - px, yy - py) <= 10
+            hole = disk & ~np.isfinite(sky)
+            if hole.any() and np.isfinite(sky[disk]).any():
+                sky = np.where(hole, np.nanmax(sky[disk]), sky)
+            sm = _nan_smooth(sky, 1.0)
+            near = np.where(disk, sm, np.nan)
+            if np.isfinite(near).any():
+                sy0, sx0 = (float(v) for v in np.unravel_index(np.nanargmax(near), near.shape))
+        cc = _centroid(sky, sx0, sy0)
+        if cc and math.hypot(cc[0] - px, cc[1] - py) <= (10.5 if tracked else 2.5):
+            t = aperture_flux(f, cc[0], cc[1])
+            if tracked or (t["flux"] is not None and t["err"] and t["flux"] / t["err"] > 8):
+                mx, my, recentred = cc[0], cc[1], True
         p = aperture_flux(f, mx, my)
+        if f.saturated is not None:
+            iy, ix = int(round(my)), int(round(mx))
+            p["saturated"] = bool(f.saturated[max(iy - 2, 0):iy + 3, max(ix - 2, 0):ix + 3].any())
         phot.append({"frame": f.id, "mjd": f.mjd, "wavelength_um": f.wavelength_um,
                      "detector": f.detector, **p})
         target_track.append({"frame": f.id, "x": round(px, 2), "y": round(py, 2),
@@ -587,7 +749,10 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
     dets = detect_changes(frames) if run_detection else []
     summary = None
     if target and not tracked and len(frames) >= 2:
-        summary = forced_summary(frames, [(t["mx"], t["my"]) for t in target_track])
+        use = [i for i, f in enumerate(frames) if not target.get("detectors") or f.detector in target["detectors"]]
+        summary = forced_summary([frames[i] for i in use], [(target_track[i]["mx"], target_track[i]["my"]) for i in use])
+        if summary is not None and target.get("detectors"):
+            summary["detectors"] = list(target["detectors"])
         hit = None
         for d in dets:
             if d["kind"] != "transient" and min(math.hypot(d["x"] - t["mx"], d["y"] - t["my"]) for t in target_track) < 3:
@@ -612,20 +777,20 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
             "wavelength_um": None if f.wavelength_um is None else round(f.wavelength_um, 4),
             "bandwidth_um": None if f.bandwidth_um is None else round(f.bandwidth_um, 4),
             "flagged_fraction": round(float((f.bad & np.isfinite(f.image)).sum() / max(np.isfinite(f.image).sum(), 1)), 4),
-            "image": b64(np.where(np.isfinite(f.image), f.image, np.nan), np.float32),
+            "dtype": "f2",
+            "image": b64(np.where(np.isfinite(f.image), f.image, np.nan), np.float16),
             "bad": b64(f.bad.astype(np.uint8), np.uint8),
             **f.meta,
         }
         if f.zodi is not None:
-            fr["zodi"] = b64(f.zodi, np.float32)
+            fr["zodi"] = b64(f.zodi, np.float16)
         if f.noise is not None:
-            fr["noise"] = b64(f.noise, np.float32)
+            fr["noise"] = b64(f.noise, np.float16)
         out_frames.append(fr)
 
     notes = list(notes or [])
-    n_flag = sum(1 for p in phot if p["flagged"])
-    if not tracked and len(phot) and n_flag >= max(1, len(phot) // 2) and any(
-            (f.meta.get("flag_counts") or {}).get("OVERFLOW", 0) >= 2 for f in frames):
+    n_flag = sum(1 for p in phot if p.get("saturated"))
+    if not tracked and len(phot) and n_flag >= max(1, len(phot) // 2):
         notes.append(f"This object is so bright that the centre of its image is saturated in {n_flag} of {len(phot)} frames. "
                      f"Its brightness values here are not reliable; they show as hollow points in the charts.")
     payload = {

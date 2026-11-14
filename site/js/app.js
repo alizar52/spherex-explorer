@@ -351,6 +351,10 @@ function draw() {
     put(render(d, n, true), cx - n * s / 2, cy - n * s / 2, a, 'A−B');
     label = `A minus B\nRed is brighter in A (${a.date.slice(0, 10)}), blue is brighter in B (${b.date.slice(0, 10)}).`;
     if (a.detector !== b.detector) label += `\nA and B come from different detector arrays, so stars differ in colour too.`;
+  } else if (S.mode === 'stack' && document.querySelector('input[name=stackKind]:checked').value === 'rgb') {
+    const cv = rgbComposite(n);
+    put(cv, cx - n * s / 2, cy - n * s / 2, null, 'rgb');
+    label = `Colour picture from all ${S.frames.length} frames\nBlue D1–D2 (0.75–2.4 µm), green D3–D4 (1.6–3.8 µm), red D5–D6 (3.8–5 µm)`;
   } else if (S.mode === 'stack') {
     const kind = document.querySelector('input[name=stackKind]:checked').value;
     const arrs = S.view.map((f) => layerOf(f)); const L = arrs[0].length; const out = new Float32Array(L);
@@ -375,11 +379,35 @@ function draw() {
       label = `${kind === 'max' ? 'Brightest pixel' : 'Average'} of ${arrs.length} frames\n${S.det ? 'Detector D' + S.det : 'All detector arrays'}`;
     }
   }
-  $('frameLabel').textContent = label;
+  const relayout = $('frameLabel').textContent !== label; $('frameLabel').textContent = label;
+  if (relayout) { requestAnimationFrame(draw); return; }
   for (const p of panels) drawOverlays(p);
   drawColorbar();
 }
 
+function rgbComposite(n) {
+  // every frame of a pair of arrays is averaged first (more signal, less noise), then each pair becomes one colour
+  const key = `_rgb_${$('repairChk').checked ? 1 : 0}${$('stretchSelect').value}${$('clipSelect').value}`;
+  if (S.data[key]) return S.data[key];
+  const groups = [[5, 6], [3, 4], [1, 2]]; const ch = [];
+  for (const dets of groups) {
+    const fs = S.frames.filter((f) => dets.includes(f.detector)); const out = new Float32Array(n * n).fill(NaN);
+    if (fs.length) {
+      const arrs = fs.map((f) => layerOf(f, 'clean')); const bads = fs.map((f) => badGrown(f, n));
+      for (let i = 0; i < n * n; i++) { let sm = 0, c = 0; for (let k = 0; k < arrs.length; k++) { const v = arrs[k][i]; if (isFinite(v) && !bads[k][i]) { sm += v; c++; } } if (c) out[i] = sm / c; }
+    }
+    ch.push(out);
+  }
+  const clip = Math.min(parseFloat($('clipSelect').value), 99.8); const st = stretchFn();
+  const sc = ch.map((a) => { const [lo, hi] = percentiles(sampleOf([a]), [20, clip]); return {lo, hi: hi > lo ? hi : lo + 1e-6}; });
+  const cv = document.createElement('canvas'); cv.width = n; cv.height = n; const ctx = cv.getContext('2d'); const im = ctx.createImageData(n, n);
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const o = ((n - 1 - y) * n + x) * 4; im.data[o + 3] = 255;
+    for (let c = 0; c < 3; c++) { const v = ch[c][y * n + x]; im.data[o + c] = isFinite(v) ? Math.round(255 * st(clamp((v - sc[c].lo) / (sc[c].hi - sc[c].lo), 0, 1))) : 46; }
+  }
+  ctx.putImageData(im, 0, 0);
+  return (S.data[key] = cv);
+}
 function toScreen(p, x, y) { const n = S.data.size; return [p.x + (x + 0.5) * p.s, p.y + (n - 1 - y + 0.5) * p.s]; }
 
 function onLight() {
@@ -425,6 +453,13 @@ function drawOverlays(p) {
       else ctx.arc(x, y, r + 2 * dpr, 0, Math.PI * 2);
       ctx.stroke();
     }
+  }
+  if (S.pick) {
+    const [x, y] = toScreen(p, S.pick.x, S.pick.y); const r = Math.max(2 * p.s, 6 * dpr);
+    const ring = () => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); };
+    halo(ctx, L, 4 * dpr, ring); ctx.strokeStyle = L ? '#0F6E99' : '#FFFFFF'; ctx.lineWidth = 1.6 * dpr; ring(); ctx.stroke();
+    ctx.font = `${12 * dpr}px ${FONT}`;
+    taken.push(tag(ctx, L, 'Your point', x + r + 4 * dpr, y + 4 * dpr, L ? '#0F6E99' : '#FFFFFF', dpr));
   }
   if ($('showDetections').checked && S.data.detections) {
     const fid = p.frame ? p.frame.id : null;
@@ -542,13 +577,31 @@ function hover(e) {
   $('readout').textContent = `${hms(sky.ra)} ${dms(sky.dec)}\n${sky.ra.toFixed(5)} ${sky.dec.toFixed(5)}  ${val}`;
 }
 function clickSelect(e) {
-  if (!S.data || !$('showDetections').checked) return; const q = eventPix(e); if (!q) return;
+  if (!S.data) return; const q = eventPix(e); if (!q) return;
   const dpr = window.devicePixelRatio || 1; let best = null, bd = 18 * dpr;
-  for (const d of S.data.detections || []) {
+  for (const d of $('showDetections').checked ? S.data.detections || [] : []) {
     const pts = d.track.length ? d.track : [d];
     for (const t of pts) { const [x, y] = toScreen(q.p, t.x, t.y); const dd = Math.hypot(x - q.sx, y - q.sy); if (dd < bd) { bd = dd; best = d; } }
   }
-  if (best) selectDetection(best.id);
+  if (best) return selectDetection(best.id);
+  if (S.data.tracked) { toast('Frames here follow the asteroid, so a fixed point on the sky cannot be measured.'); return; }
+  S.pick = {x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10}; drawCharts(); draw();
+}
+function measureAt(fr, x, y) {
+  // same 2-pixel aperture and 5-9 pixel sky ring as the pipeline (spherex.aperture_flux)
+  const n = S.data.size; const img = frameArr(fr, 'img'), z = frameArr(fr, 'zodi'), bad = frameArr(fr, 'bad'), nz = frameArr(fr, 'noise');
+  let s = 0, cnt = 0, v = 0, flagged = false; const ring = [];
+  for (let j = Math.max(0, Math.floor(y - 9)); j <= Math.min(n - 1, Math.ceil(y + 9)); j++)
+    for (let i = Math.max(0, Math.floor(x - 9)); i <= Math.min(n - 1, Math.ceil(x + 9)); i++) {
+      const k = j * n + i; const d = Math.hypot(i - x, j - y); const val = img[k] - (z ? z[k] : 0);
+      if (!isFinite(val)) continue;
+      if (d <= 2) { s += val; cnt++; if (nz && isFinite(nz[k])) v += nz[k] * nz[k]; if (bad[k]) flagged = true; }
+      else if (d >= 5 && d <= 9 && !bad[k]) ring.push(val);
+    }
+  if (cnt < 3 || ring.length < 8) return {flux: null, err: null, flagged: true};
+  ring.sort((a, b) => a - b); const bg = ring[ring.length >> 1];
+  const kconv = Math.pow(PIX_ARCSEC / 206264.806, 2) * 1e9;
+  return {flux: (s - bg * cnt) * kconv, err: Math.sqrt(v) * kconv, flagged};
 }
 
 function setFrame(i) {
@@ -720,7 +773,7 @@ function zoomTo(x, y, z) {
 function chartSVG(el, pts, xKey, yLabel, xFmt, xDomain) {
   const W = el.clientWidth || 300, H = el.clientHeight || 100; const m = {l: 44, r: 8, t: 6, b: 18};
   const good = pts.filter((p) => p.flux != null && isFinite(p.flux) && p[xKey] != null);
-  if (good.length < 1) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"><text class="empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${pts.length && pts.every((p) => p.flagged) ? 'The target is saturated in every frame' : 'No usable measurement at the target'}</text></svg>`; return; }
+  if (good.length < 1) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"><text class="empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${pts.length && pts.every((p) => p.flagged) ? 'The target is saturated in every frame' : 'No usable measurement here'}</text></svg>`; return; }
   const xs = good.map((p) => p[xKey]); let x0 = xDomain ? xDomain[0] : Math.min(...xs), x1 = xDomain ? xDomain[1] : Math.max(...xs);
   if (x1 === x0) { x0 -= 1; x1 += 1; }
   const ys = good.flatMap((p) => [p.flux - (p.err || 0), p.flux + (p.err || 0)]); let y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -739,13 +792,21 @@ function chartSVG(el, pts, xKey, yLabel, xFmt, xDomain) {
   el.querySelectorAll('circle').forEach((c) => { c.onclick = () => jumpToFrame(c.dataset.frame); });
 }
 function drawCharts() {
-  if (!S.data) return; const ph = S.data.photometry || [];
+  if (!S.data) return; let ph = S.data.photometry || [];
+  const pk = S.pick;
+  if (pk) ph = S.frames.map((f) => ({frame: f.id, mjd: f.mjd, wavelength_um: f.wavelength_um, detector: f.detector, ...measureAt(f, pk.x, pk.y)}));
+  const sky = pk ? pixToSky(pk.x, pk.y, ctr().ra, ctr().dec, S.data.size) : null;
+  $('lcTitle').textContent = pk ? 'Brightness over time at your point' : 'Target brightness over time';
+  $('specTitle').textContent = pk ? `Spectrum at RA ${sky.ra.toFixed(4)}°, Dec ${sky.dec.toFixed(4)}°` : 'Target spectrum';
+  $('specNote').textContent = pk ? `Measured just now in your browser from all ${ph.length} frames, in a 2-pixel circle with the sky ring around it subtracted.`
+    : 'Each frame is taken at its own wavelength, so all frames together give a spectrum. Click any star on the image to measure its spectrum.';
+  $('pickReset').classList.toggle('hidden', !pk);
   const mj = ph.map((p) => p.mjd); const span = mj.length ? Math.max(...mj) - Math.min(...mj) : 0;
   const mjd2date = (v) => { const d = new Date((v - 40587) * 86400000).toISOString(); return span < 3 ? d.slice(11, 16) : span < 120 ? d.slice(5, 10) : d.slice(0, 7); };
   chartSVG($('lcChart'), ph, 'mjd', 'mJy', mjd2date);
   chartSVG($('specChart'), ph.map((p) => ({...p, wl: p.wavelength_um})), 'wl', 'mJy', (v) => v.toFixed(1) + 'µm', [0.7, 5.05]);
   const dets = new Set(ph.map((p) => p.detector)); const wl = ph.map((p) => p.wavelength_um).filter((v) => v);
-  $('photNote').textContent = `In millijansky, measured in a 2-pixel circle ${S.data.tracked ? 'at the predicted position of the asteroid' : 'at the target'}. Frames span ${wl.length ? Math.min(...wl).toFixed(2) + ' to ' + Math.max(...wl).toFixed(2) + ' µm' : 'several wavelengths'}, so part of the change is colour. Hollow points are saturated or flagged.`;
+  $('photNote').textContent = `In millijansky, measured in a 2-pixel circle ${pk ? 'at the point you clicked' : S.data.tracked ? 'at the predicted position of the asteroid' : 'at the target'}. Frames span ${wl.length ? Math.min(...wl).toFixed(2) + ' to ' + Math.max(...wl).toFixed(2) + ' µm' : 'several wavelengths'}, so part of the change is colour. Hollow points are saturated or flagged.`;
   highlightCharts();
 }
 function highlightCharts() {
@@ -768,7 +829,7 @@ function defaultDetector(frames) {
 
 function onData(data, opts = {}) {
   play(false);
-  S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null;
+  S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null; S.pick = null;
   S.catalogs = {gaia: null, allwise: null}; S.zoom = 1; S.panX = S.panY = 0;
   if (opts.det === 0 || S.frames.some((f) => f.detector === opts.det)) S.det = opts.det;
   else S.det = defaultDetector(S.frames);
@@ -975,6 +1036,7 @@ function wire() {
     S.zoom = 1; S.panX = S.panY = 0; S.scaleCache.clear(); draw(); renderThumbs();
   });
   $('aladinBtn').addEventListener('click', openAladin);
+  $('pickReset').addEventListener('click', () => { S.pick = null; drawCharts(); draw(); });
   $('zoomIn').onclick = () => { S.zoom = clamp(S.zoom * 1.4, 0.5, 16); draw(); };
   $('zoomOut').onclick = () => { S.zoom = clamp(S.zoom / 1.4, 0.5, 16); draw(); };
   $('zoomReset').onclick = () => { S.zoom = 1; S.panX = S.panY = 0; draw(); };

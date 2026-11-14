@@ -16,6 +16,9 @@ Type a position on the sky (right ascension and declination) or pick an object. 
 - A strip of thumbnails under the image: every photo with its date, detector array and wavelength
 - Colour maps: magma (default), grey, negative, inferno, ice. Labels on the image have a dark backing and do not overlap
 - Filter by detector array D1 to D6; brightness over time and a spectrum built from every frame
+- Click any star to get its spectrum and light curve, measured in the browser from all frames
+- Colour picture: all frames of arrays D1–D2, D3–D4 and D5–D6 averaged and shown as blue, green and red
+- Gaia DR3 and AllWISE overlays also work on GitHub Pages (loaded straight from CDS VizieR)
 - Changes found: moving objects, shifted positions (proper motion), brightness changes, single-frame spots, each with a score and plain-language explanation
 - Field of view from 3.3′ to 13.1′, quality flags shown on the image, Gaia DR3 and AllWISE overlays, Aladin sky atlas
 - Links with coordinates (`?ra=…&dec=…`, `?obj=…`) and embed code

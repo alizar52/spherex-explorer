@@ -7,14 +7,17 @@ const API = (CFG.apiBase || '').replace(/\/$/, '');
 const $ = (id) => document.getElementById(id);
 const PIX_ARCSEC = 6.15;
 const DET_RANGE = {1: [0.75, 1.09], 2: [1.10, 1.62], 3: [1.63, 2.41], 4: [2.42, 3.82], 5: [3.83, 4.41], 6: [4.42, 5.00]};
-const DET_COLOR = {1: '#7aa7ff', 2: '#4fd1c5', 3: '#8de07f', 4: '#f2d16b', 5: '#ff9f5a', 6: '#ff6b8b'};
-const KIND_COLOR = {moving: '#ffb454', shifted: '#5aa9ff', variable: '#c38bff', transient: '#8494b3'};
-const KIND_LABEL = {moving: 'Moving object', shifted: 'Shifted position', variable: 'Brightness change', transient: 'One-frame spot'};
+// detector arrays: a quiet ramp from short (cool grey-blue) to long wavelengths (warm grey)
+const DET_COLOR = {1: '#6E8FA3', 2: '#7A9AA0', 3: '#8FA393', 4: '#A8A385', 5: '#B39A80', 6: '#B48C82'};
+const KIND_COLOR = {moving: '#E5A03A', shifted: '#5CB3D6', variable: '#B98BDB', transient: '#939DA2'};
+// darker versions for marks drawn on the light 'plate' colour map
+const KIND_INK = {moving: '#B86E00', shifted: '#0F6E99', variable: '#7A3FA8', transient: '#55626A'};
+const KIND_LABEL = {moving: 'Moving object', shifted: 'Shifted position', variable: 'Brightness change', transient: 'Single-frame spot'};
 const KIND_EXPLAIN = {
-  moving: 'A source that is not in the usual sky and shows up at several places along a straight line, in time order — typical of an asteroid or comet.',
-  shifted: 'A source whose centre drifts steadily between dates. Nearby stars and brown dwarfs do this because of their own motion through space (proper motion) and Earth\'s orbit (parallax).',
-  variable: 'A source whose brightness differs clearly between frames taken at nearly the same wavelength — a variable star, flare or eclipse.',
-  transient: 'A strong spot in a single frame only. Often a cosmic-ray hit or artefact the flags missed — but worth a look.',
+  moving: 'Something that is not in the usual sky and appears at several places along a straight line, in date order. Asteroids and comets look like this.',
+  shifted: 'A star whose centre drifts steadily from date to date. Nearby stars and brown dwarfs do this because they move through space (proper motion) and because Earth moves around the Sun (parallax).',
+  variable: 'A star that is clearly brighter in some frames than in others taken at almost the same wavelength, compared with its neighbours. Variable stars, flares and eclipses do this.',
+  transient: 'A bright spot in one frame only. Usually a cosmic-ray hit that the quality flags missed, but worth a look.',
 };
 
 // ------------------------------------------------------------------ state
@@ -116,6 +119,7 @@ function targetXY(fr) {   // where the object of interest is in a given frame (p
 
 // ------------------------------------------------------------------ colour maps
 const CMAPS = {
+  plate: [[227, 234, 236], [190, 201, 205], [120, 134, 140], [52, 63, 68], [16, 23, 26]],
   gray: [[0, 0, 0], [255, 255, 255]],
   inferno: [[0, 0, 4], [31, 12, 72], [85, 15, 109], [136, 34, 106], [186, 54, 85], [227, 89, 51], [249, 140, 10], [249, 201, 50], [252, 255, 164]],
   viridis: [[68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142], [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37]],
@@ -261,7 +265,7 @@ function render(arr, n, diverging = false) {
     const row = n - 1 - y; // north up: FITS row 0 is the bottom
     for (let x = 0; x < n; x++) {
       const v = arr[y * n + x]; const o = (row * n + x) * 4;
-      if (!isFinite(v)) { px[o] = 10; px[o + 1] = 15; px[o + 2] = 26; px[o + 3] = 255; continue; }
+      if (!isFinite(v)) { px[o] = 46; px[o + 1] = 53; px[o + 2] = 58; px[o + 3] = 255; continue; }
       let t;
       if (diverging) { const m = sc.hi; const u = clamp(Math.abs(v) / m, 0, 1); t = 0.5 + Math.sign(v) * 0.5 * st(u); }
       else t = st(clamp((v - sc.lo) / (sc.hi - sc.lo), 0, 1));
@@ -299,7 +303,7 @@ function frameB() { return S.view[S.B]; }
 
 function draw() {
   const W = stage.width, H = stage.height; const dpr = window.devicePixelRatio || 1;
-  sctx.setTransform(1, 0, 0, 1, 0, 0); sctx.fillStyle = '#03060c'; sctx.fillRect(0, 0, W, H);
+  sctx.setTransform(1, 0, 0, 1, 0, 0); sctx.fillStyle = '#1E2326'; sctx.fillRect(0, 0, W, H);
   panels = [];
   if (!S.data || !S.view.length) { $('frameLabel').textContent = ''; return; }
   $('stageMsg').textContent = '';
@@ -324,12 +328,12 @@ function draw() {
     const fr = S.mode === 'blink' ? (S.blinkShowB ? frameB() : frameA()) : curFrame();
     put(render(layerOf(fr), n), cx - n * s / 2, cy - n * s / 2, fr, S.mode === 'blink' ? (S.blinkShowB ? 'B' : 'A') : '');
     const idx = S.view.indexOf(fr);
-    label = `${S.mode === 'blink' ? (S.blinkShowB ? 'B' : 'A') + ' · ' : ''}${fmtDate(fr.date)}\nD${fr.detector ?? '?'} · λ ${fmtNum(fr.wavelength_um, 3)} µm · ${idx + 1}/${S.view.length}`;
+    label = `${S.mode === 'blink' ? (S.blinkShowB ? 'B: ' : 'A: ') : ''}${fmtDate(fr.date)}\nFrame ${idx + 1} of ${S.view.length}, detector D${fr.detector ?? '?'}, ${fmtNum(fr.wavelength_um, 3)} µm`;
   } else if (S.mode === 'side') {
     const a = frameA(), b = frameB(); const w = n * s;
     put(render(layerOf(a), n), cx - w - gap / 2, cy - w / 2, a, 'A');
     put(render(layerOf(b), n), cx + gap / 2, cy - w / 2, b, 'B');
-    label = `A ${fmtDate(a.date)} · D${a.detector}\nB ${fmtDate(b.date)} · D${b.detector}`;
+    label = `A: ${fmtDate(a.date)}, D${a.detector}\nB: ${fmtDate(b.date)}, D${b.detector}`;
   } else if (S.mode === 'swipe') {
     const a = frameA(), b = frameB(); const w = n * s; const ox = cx - w / 2, oy = cy - w / 2;
     const xs = ox + w * S.swipe;
@@ -337,13 +341,13 @@ function draw() {
     put(render(layerOf(b), n), ox, oy, b, 'B', [xs, oy, ox + w - xs, w]);
     sctx.strokeStyle = '#ffb454'; sctx.lineWidth = 2 * dpr; sctx.beginPath(); sctx.moveTo(xs, oy - 6); sctx.lineTo(xs, oy + w + 6); sctx.stroke();
     sctx.fillStyle = '#ffb454'; sctx.font = `${11 * dpr}px sans-serif`; sctx.fillText('A', xs - 16 * dpr, oy + 14 * dpr); sctx.fillText('B', xs + 7 * dpr, oy + 14 * dpr);
-    label = `A ${fmtDate(a.date)} | B ${fmtDate(b.date)}\ndrag on the image to move the divider`;
+    label = `A: ${fmtDate(a.date)}\nB: ${fmtDate(b.date)}. Drag across the image to move the divider.`;
   } else if (S.mode === 'diff') {
     const a = frameA(), b = frameB(); const la = layerOf(a), lb = layerOf(b);
     const d = new Float32Array(la.length); for (let i = 0; i < d.length; i++) d[i] = la[i] - lb[i];
     put(render(d, n, true), cx - n * s / 2, cy - n * s / 2, a, 'A−B');
-    label = `A − B   (red: brighter in A, blue: brighter in B)\nA ${fmtDate(a.date)} · D${a.detector}  B ${fmtDate(b.date)} · D${b.detector}`;
-    if (a.detector !== b.detector) label += '\n⚠ different detector arrays — colours differ';
+    label = `A minus B\nRed is brighter in A (${a.date.slice(0, 10)}), blue is brighter in B (${b.date.slice(0, 10)}).`;
+    if (a.detector !== b.detector) label += `\nA and B come from different detector arrays, so stars differ in colour too.`;
   } else if (S.mode === 'stack') {
     const kind = document.querySelector('input[name=stackKind]:checked').value;
     const arrs = S.view.map((f) => layerOf(f)); const L = arrs[0].length; const out = new Float32Array(L);
@@ -364,10 +368,10 @@ function draw() {
     if (kind === 'resid') {
       const c = layerOf(curFrame()); const r = new Float32Array(L); for (let i = 0; i < L; i++) r[i] = c[i] - out[i];
       put(render(r, n, true), cx - n * s / 2, cy - n * s / 2, curFrame(), 'resid');
-      label = `current − mean of ${arrs.length} frames\n${fmtDate(curFrame().date)} · D${curFrame().detector}`;
+      label = `${fmtDate(curFrame().date)} minus the average\nRed is brighter than usual, blue is fainter.`;
     } else {
       put(render(out, n), cx - n * s / 2, cy - n * s / 2, null, kind);
-      label = `${kind === 'max' ? 'Maximum' : 'Mean'} of ${arrs.length} frames${S.det ? ' (D' + S.det + ')' : ' (all arrays)'}`;
+      label = `${kind === 'max' ? 'Brightest pixel' : 'Average'} of ${arrs.length} frames\n${S.det ? 'Detector D' + S.det : 'All detector arrays'}`;
     }
   }
   $('frameLabel').textContent = label;
@@ -377,19 +381,25 @@ function draw() {
 
 function toScreen(p, x, y) { const n = S.data.size; return [p.x + (x + 0.5) * p.s, p.y + (n - 1 - y + 0.5) * p.s]; }
 
+// true when the image under the overlays is mostly light (plate map, difference, residual)
+function onLight() {
+  return $('cmapSelect').value === 'plate' || S.mode === 'diff' ||
+    (S.mode === 'stack' && document.querySelector('input[name=stackKind]:checked').value === 'resid');
+}
 function drawOverlays(p) {
+  const L = onLight(); const KC = L ? KIND_INK : KIND_COLOR; const FONT = 'Archivo, Arial, sans-serif';
   const n = S.data.size; const dpr = window.devicePixelRatio || 1; const ctx = sctx;
   ctx.save();
   ctx.beginPath(); ctx.rect(p.x, p.y, n * p.s, n * p.s); ctx.clip();
   // crosshair on the requested position
   if ($('showCross').checked) {
     const tq = targetXY(p.frame); const [x, y] = toScreen(p, tq.x, tq.y); const r = 9 * dpr, g = 4 * dpr;
-    ctx.strokeStyle = 'rgba(90,169,255,.85)'; ctx.lineWidth = 1.2 * dpr; ctx.beginPath();
+    ctx.strokeStyle = L ? 'rgba(15,110,153,.9)' : 'rgba(92,179,214,.9)'; ctx.lineWidth = 1.4 * dpr; ctx.beginPath();
     ctx.moveTo(x - r - g, y); ctx.lineTo(x - g, y); ctx.moveTo(x + g, y); ctx.lineTo(x + r + g, y);
     ctx.moveTo(x, y - r - g); ctx.lineTo(x, y - g); ctx.moveTo(x, y + g); ctx.lineTo(x, y + r + g); ctx.stroke();
   }
   // catalog overlays
-  const cats = [['gaia', $('showGaia').checked, '#7fd3ff'], ['allwise', $('showWise').checked, '#ffb454']];
+  const cats = [['gaia', $('showGaia').checked, L ? '#0F6E99' : '#5CB3D6'], ['allwise', $('showWise').checked, L ? '#B86E00' : '#E5A03A']];
   for (const [k, on, col] of cats) {
     const c = S.catalogs[k]; if (!on || !c || S.data.tracked) continue;
     ctx.strokeStyle = col; ctx.lineWidth = 1 * dpr;
@@ -407,7 +417,7 @@ function drawOverlays(p) {
   if ($('showDetections').checked && S.data.detections) {
     const fid = p.frame ? p.frame.id : null;
     for (const d of S.data.detections) {
-      const col = KIND_COLOR[d.kind] || '#fff'; const sel = S.sel === d.id;
+      const col = KC[d.kind] || '#fff'; const sel = S.sel === d.id;
       ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = (sel ? 2.4 : 1.5) * dpr;
       const here = d.track.find((t) => t.frame === fid);
       const R = clamp(2.6 * p.s, 7 * dpr, 24 * dpr);
@@ -432,18 +442,22 @@ function drawOverlays(p) {
         ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
       }
       const c0 = here || d.track[0] || d; const [lx, ly] = toScreen(p, c0.x, c0.y);
-      ctx.font = `${(sel ? 11.5 : 10.5) * dpr}px ui-monospace, monospace`; ctx.fillText(d.id, lx + R + 3 * dpr, ly - R + 4 * dpr);
+      if (sel || d.name) {
+        ctx.font = `600 ${12 * dpr}px ${FONT}`; const txt = d.name || KIND_LABEL[d.kind]; const tw = ctx.measureText(txt).width;
+        const right = p.x + n * p.s; const tx = lx + R + 4 * dpr + tw > right - 4 * dpr ? lx - R - 4 * dpr - tw : lx + R + 4 * dpr;
+        ctx.fillText(txt, tx, ly - R + 6 * dpr);
+      }
     }
   }
   ctx.restore();
   // compass + scale bar
-  const w = n * p.s; const bx = p.x + 10 * dpr, by = p.y + w - 12 * dpr; const L = 60 / PIX_ARCSEC * p.s;
-  ctx.strokeStyle = '#dfe7f5'; ctx.fillStyle = '#dfe7f5'; ctx.lineWidth = 1.5 * dpr; ctx.font = `${10 * dpr}px sans-serif`;
-  if (L < w * 0.6) { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + L, by); ctx.stroke(); ctx.fillText('1′', bx + L / 2 - 4 * dpr, by - 4 * dpr); }
+  const w = n * p.s; const bx = p.x + 10 * dpr, by = p.y + w - 12 * dpr; const bar = 60 / PIX_ARCSEC * p.s;
+  const ink = L ? '#10171A' : '#DCE2E4'; ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 1.5 * dpr; ctx.font = `${11 * dpr}px ${FONT}`;
+  if (bar < w * 0.6) { ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bar, by); ctx.stroke(); ctx.fillText('1′', bx + bar / 2 - 4 * dpr, by - 5 * dpr); }
   const ex = p.x + w - 16 * dpr, ey = p.y + w - 16 * dpr, a = 20 * dpr;
   ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex, ey - a); ctx.moveTo(ex, ey); ctx.lineTo(ex - a, ey); ctx.stroke();
   ctx.fillText('N', ex - 3 * dpr, ey - a - 3 * dpr); ctx.fillText('E', ex - a - 10 * dpr, ey + 4 * dpr);
-  if (p.tag && !['timelapse', 'stack'].includes(S.mode)) { ctx.font = `bold ${12 * dpr}px sans-serif`; ctx.fillStyle = '#ffb454'; ctx.fillText(p.tag, p.x + 8 * dpr, p.y + 16 * dpr); }
+  if (p.tag && ['side', 'swipe', 'blink'].includes(S.mode)) { ctx.font = `700 ${13 * dpr}px ${FONT}`; ctx.fillStyle = L ? '#B86E00' : '#E5A03A'; ctx.fillText(p.tag, p.x + 8 * dpr, p.y + 18 * dpr); }
 }
 
 // pointer: pan, zoom, swipe, hover readout, click to select
@@ -514,11 +528,14 @@ function clickSelect(e) {
 // ------------------------------------------------------------------ player & timeline
 function setFrame(i) {
   if (!S.view.length) return;
-  S.cur = (i + S.view.length) % S.view.length; $('frameSlider').value = S.cur;
-  updateTicks(); updateFrameMeta(); highlightCharts(); draw();
+  S.cur = (i + S.view.length) % S.view.length;
+  updateStrip(); updateFrameMeta(); highlightCharts(); draw();
 }
 function play(on) {
-  S.playing = on ?? !S.playing; $('playBtn').textContent = S.playing ? '❚❚' : '▶';
+  S.playing = on ?? !S.playing;
+  if (S.playing && S.view.length < 2) S.playing = false;
+  $('playBtn').classList.toggle('playing', S.playing);
+  $('playBtn').setAttribute('aria-label', S.playing ? 'Pause' : 'Play');
   clearInterval(S.timer);
   if (S.playing) {
     if (!['timelapse', 'blink', 'stack'].includes(S.mode)) setMode('timelapse');
@@ -528,32 +545,41 @@ function play(on) {
     }, 1000 / fps);
   }
 }
+// The plate strip: one real thumbnail per frame, in date order. It is the timeline and the frame picker.
 function buildTimeline() {
-  const ticks = $('ticks'), axis = $('axis'); ticks.innerHTML = ''; axis.innerHTML = '';
-  const v = S.view; $('frameSlider').max = Math.max(0, v.length - 1);
-  if (!v.length) return;
-  // ticks are spaced by frame index (like the slider) and labelled with real dates
-  const pos = (i) => v.length === 1 ? 50 : (i / (v.length - 1)) * 100;
-  v.forEach((f, i) => {
-    const t = document.createElement('i'); t.style.left = pos(i) + '%'; t.style.background = DET_COLOR[f.detector] || '#aaa';
-    t.title = `${fmtDate(f.date)} · D${f.detector} · ${fmtNum(f.wavelength_um, 3)} µm`; t.onclick = () => setFrame(i); ticks.appendChild(t);
+  const strip = $('strip'); strip.innerHTML = '';
+  S.view.forEach((f, i) => {
+    const b = document.createElement('button'); b.className = 'plate'; b.type = 'button';
+    b.setAttribute('role', 'option');
+    b.setAttribute('aria-label', `Frame ${i + 1} of ${S.view.length}, ${fmtDate(f.date)}, detector ${f.detector ?? 'unknown'}, ${fmtNum(f.wavelength_um, 2)} micrometres`);
+    b.innerHTML = `<canvas width="${S.data.size}" height="${S.data.size}"></canvas><span class="ab-mark"></span>` +
+      `<span class="bar" style="background:${DET_COLOR[f.detector] || '#666'}"></span>` +
+      `<span class="d">${f.date.slice(0, 10)}</span><span>D${f.detector ?? '?'}, ${fmtNum(f.wavelength_um, 2)} µm</span>`;
+    b.onclick = () => { play(false); if (S.mode !== 'timelapse' && S.mode !== 'stack') setMode('timelapse'); setFrame(i); };
+    strip.appendChild(b);
   });
-  let lastLabel = -100, lastKey = '';
-  v.forEach((f, i) => {
-    const key = f.date.slice(0, 7); const x = pos(i);
-    if (key !== lastKey && x - lastLabel > 12) {
-      const s = document.createElement('span'); s.style.left = x + '%'; s.textContent = f.date.slice(0, 10); axis.appendChild(s); lastLabel = x;
-    }
-    lastKey = key;
+  renderThumbs(); updateStrip();
+}
+function renderThumbs() {
+  if (!S.data) return; const n = S.data.size;
+  [...$('strip').children].forEach((b, i) => {
+    const fr = S.view[i]; if (!fr) return;
+    const c = b.querySelector('canvas'); c.getContext('2d').drawImage(render(layerOf(fr), n), 0, 0);
   });
-  updateTicks();
 }
-function updateTicks() {
-  [...$('ticks').children].forEach((t, i) => { t.className = (i === S.cur ? 'cur ' : '') + (i === S.A ? 'A ' : '') + (i === S.B && S.B !== S.A ? 'B' : ''); });
+function updateStrip() {
+  const kids = [...$('strip').children];
+  kids.forEach((b, i) => {
+    b.setAttribute('aria-selected', i === S.cur ? 'true' : 'false');
+    b.querySelector('.ab-mark').textContent = ['blink', 'side', 'swipe', 'diff'].includes(S.mode) ? (i === S.A ? 'A' : i === S.B ? 'B' : '') : '';
+  });
+  const cur = kids[S.cur];
+  if (cur) { const st = $('strip'); const l = cur.offsetLeft - st.offsetLeft; if (l < st.scrollLeft || l + cur.offsetWidth > st.scrollLeft + st.clientWidth) st.scrollLeft = l - st.clientWidth / 2 + cur.offsetWidth / 2; }
 }
+const updateTicks = updateStrip;
 
 // ------------------------------------------------------------------ panels
-function frameLabelShort(f, i) { return `${i + 1} · ${f.date.slice(0, 10)} · D${f.detector ?? '?'} ${fmtNum(f.wavelength_um, 2)} µm`; }
+function frameLabelShort(f, i) { return `${f.date.slice(0, 10)}, D${f.detector ?? '?'}, ${fmtNum(f.wavelength_um, 2)} µm`; }
 function applyFilter(keepFrameId) {
   const keep = keepFrameId || (curFrame() && curFrame().id);
   S.view = S.frames.filter((f) => !S.det || f.detector === S.det);
@@ -575,13 +601,15 @@ function updateDetChips() {
   const counts = {}; S.frames.forEach((f) => { counts[f.detector] = (counts[f.detector] || 0) + 1; });
   const mk = (d, text, sub) => {
     const b = document.createElement('button'); b.className = 'chip' + (S.det === d ? ' active' : '') + (d && !counts[d] ? ' off' : '');
-    b.innerHTML = `${text}<span class="sub">${sub}</span>`; b.disabled = !!d && !counts[d];
-    if (d) b.style.borderLeft = `3px solid ${DET_COLOR[d]}`;
+    b.textContent = text; b.disabled = !!d && !counts[d];
+    if (d) b.style.borderBottomColor = DET_COLOR[d];
+    b.setAttribute('aria-pressed', S.det === d ? 'true' : 'false');
+    b.title = d ? `Detector ${d}: ${DET_RANGE[d][0]}–${DET_RANGE[d][1]} µm, ${counts[d] || 0} frames` : 'Frames from every detector array';
     b.onclick = () => { S.det = d; applyFilter(); updateURL(); }; box.appendChild(b);
   };
   mk(0, 'All', S.frames.length);
   for (let d = 1; d <= 6; d++) mk(d, `D${d}`, counts[d] ? `${counts[d]}` : '0');
-  $('detHint').textContent = S.det ? `D${S.det}: ${DET_RANGE[S.det][0]}–${DET_RANGE[S.det][1]} µm` : 'Each of SPHEREx\'s 6 detector arrays sees a different slice of 0.75–5 µm.';
+  $('detHint').textContent = S.det ? `D${S.det} covers ${DET_RANGE[S.det][0]} to ${DET_RANGE[S.det][1]} µm.` : 'Six arrays, each covering part of 0.75 to 5 µm.';
 }
 function updateFrameMeta() {
   const f = curFrame(); if (!f) { $('frameMeta').innerHTML = ''; return; }
@@ -592,8 +620,8 @@ function updateFrameMeta() {
     <dt>MJD</dt><dd>${fmtNum(f.mjd, 5)}</dd>
     <dt>Detector</dt><dd>D${f.detector ?? '?'}${rng ? ` (${rng[0]}–${rng[1]} µm)` : ''}</dd>
     <dt>Wavelength</dt><dd>${fmtNum(f.wavelength_um, 4)} µm${f.bandwidth_um ? ` ± ${fmtNum(f.bandwidth_um / 2, 4)}` : ''}</dd>
-    <dt>Flagged px</dt><dd>${(100 * (f.flagged_fraction || 0)).toFixed(1)} %${f.flag_counts ? ' — ' + Object.entries(f.flag_counts).filter(([k]) => k !== 'SOURCE').map(([k, v]) => `${k.toLowerCase()} ${v}`).join(', ') : ''}</dd>
-    ${f.psf_fwhm_arcsec ? `<dt>PSF width</dt><dd>${f.psf_fwhm_arcsec}″ (pixel 6.15″)</dd>` : ''}
+    <dt>Flagged</dt><dd>${(100 * (f.flagged_fraction || 0)).toFixed(1)} % of pixels${f.flag_counts ? ` (${Object.entries(f.flag_counts).filter(([k]) => k !== 'SOURCE').map(([k, v]) => `${k.toLowerCase().replace('_', ' ')} ${v}`).join(', ')})` : ''}</dd>
+    ${f.psf_fwhm_arcsec ? `<dt>Star width</dt><dd>${f.psf_fwhm_arcsec}″ (one pixel is 6.15″)</dd>` : ''}
     <dt>File</dt><dd>${link}</dd>
     <dt>Source</dt><dd>${S.data.source}</dd></dl>`;
 }
@@ -605,24 +633,26 @@ function showNotes() {
 function setSourceBadge() {
   const b = $('sourceBadge'); const d = S.data;
   b.className = 'badge ' + (d.demo ? 'demo' : /live/i.test(d.source) ? 'live' : 'real');
-  b.textContent = d.demo ? 'synthetic demo data' : d.source;
+  b.textContent = d.demo ? 'Synthetic test data' : /live/i.test(d.source) ? 'Live from IRSA' : 'Real SPHEREx images';
 }
 
 // detections list + inspector
 function buildDetList() {
   const ul = $('detList'); ul.innerHTML = ''; const dets = S.data.detections || [];
   $('detCount').textContent = dets.length;
-  if (!dets.length) { ul.innerHTML = `<li class="muted" style="cursor:default;grid-template-columns:1fr">${S.frames.length < 2 ? 'Need at least two images to compare.' : 'No significant change found in this field.'}</li>`; return; }
+  if (!dets.length) { ul.innerHTML = `<li class="empty">${S.frames.length < 2 ? 'Only one frame here, so there is nothing to compare. Try another object.' : 'Nothing changed enough to be flagged. Play the frames and look for yourself.'}</li>`; return; }
   for (const d of dets) {
     const li = document.createElement('li'); li.dataset.id = d.id; if (S.sel === d.id) li.className = 'sel';
-    const extra = d.kind === 'moving' ? (d.speed_arcsec_per_day != null ? `${d.speed_arcsec_per_day}″/day` : (S.data.tracked ? 'known asteroid' : 'catalogue-guided')) :
-      d.kind === 'shifted' ? `${d.motion_arcsec_per_year}″/yr` :
-      d.kind === 'variable' ? `×${d.amplitude_ratio} brightness` : `${d.frames.length} frame`;
+    const extra = d.kind === 'moving' ? (d.speed_arcsec_per_day != null ? `${d.speed_arcsec_per_day}″ a day` : (S.data.tracked ? 'known asteroid' : 'position from catalogue')) :
+      d.kind === 'shifted' ? `${d.motion_arcsec_per_year}″ a year` :
+      d.kind === 'variable' ? `${d.amplitude_ratio}× brighter at peak` : 'one frame';
     const conf = d.confidence == null ? null : Math.round(d.confidence * 100);
-    li.innerHTML = `<span class="id" style="color:${KIND_COLOR[d.kind]}">${d.id}</span>
-      <span class="kind">${d.name ? d.name + ' · ' : ''}${KIND_LABEL[d.kind] || d.kind}<small>${extra} · ${d.frames.length} frames</small></span>
-      <span>${conf == null ? '<div class="conf-txt">not scored</div>' : `<div class="conf"><b style="width:${conf}%;background:${KIND_COLOR[d.kind]}"></b></div><div class="conf-txt">score ${conf}%</div>`}</span>`;
-    li.onclick = () => selectDetection(d.id); ul.appendChild(li);
+    li.style.borderLeftColor = KIND_COLOR[d.kind]; li.tabIndex = 0;
+    li.innerHTML = `<span class="kind">${d.name || KIND_LABEL[d.kind] || d.kind}<small>${d.name ? KIND_LABEL[d.kind].toLowerCase() + ', ' : ''}${extra}, ${d.frames.length} frame${d.frames.length === 1 ? '' : 's'}</small></span>
+      <span>${conf == null ? '<div class="conf-txt">no score</div>' : `<div class="conf"><b style="width:${conf}%;background:${KIND_COLOR[d.kind]}"></b></div><div class="conf-txt">score ${conf}</div>`}</span>`;
+    li.onclick = () => selectDetection(d.id);
+    li.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectDetection(d.id); } };
+    ul.appendChild(li);
   }
 }
 function selectDetection(id) {
@@ -633,26 +663,24 @@ function selectDetection(id) {
   const rows = [
     ...(d.name ? [['Object', d.name]] : []),
     ['Type', `<span style="color:${KIND_COLOR[d.kind]}">${KIND_LABEL[d.kind]}</span>`],
-    ['RA, Dec', `${hms(sky.ra)} ${dms(sky.dec)}`],
-    ['degrees', `${sky.ra.toFixed(5)} ${sky.dec.toFixed(5)}`],
-    ['Pixel', `x ${(+d.x).toFixed(1)} · y ${(+d.y).toFixed(1)}`],
-    ['Score', d.confidence == null ? 'not scored (position from catalogue)' : `${Math.round(d.confidence * 100)} % (heuristic)`],
-    ['Significance', d.snr == null ? '—' : `${d.snr} σ`],
-    ['Seen in', `${d.frames.length} frame(s)`],
+    ['Position', `${hms(sky.ra)} ${dms(sky.dec)}<br>${sky.ra.toFixed(5)}°, ${sky.dec.toFixed(5)}°`],
+    ['Score', d.confidence == null ? 'none, the position comes from a catalogue' : `${Math.round(d.confidence * 100)} out of 100`],
+    ...(d.snr == null ? [] : [['Signal', `${d.snr} times the noise`]]),
+    ['Seen in', `${d.frames.length} frame${d.frames.length === 1 ? '' : 's'}`],
   ];
-  if (d.speed_arcsec_per_day != null) rows.push(['Speed', `${d.speed_arcsec_per_day} ″/day`]);
-  if (d.motion_arcsec_per_year != null) rows.push(['Measured', `${d.motion_arcsec_per_year} ″/yr (${d.displacement_px} px in these frames)`]);
+  if (d.speed_arcsec_per_day != null) rows.push(['Speed', `${d.speed_arcsec_per_day}″ a day`]);
+  if (d.motion_arcsec_per_year != null) rows.push(['Measured', `${d.motion_arcsec_per_year}″ a year, ${d.displacement_px} px across these frames`]);
   if (d.motion_east_arcsec_per_year != null) rows.push(['Direction', `${Math.abs(d.motion_east_arcsec_per_year)}″ ${d.motion_east_arcsec_per_year >= 0 ? 'E' : 'W'}, ${Math.abs(d.motion_north_arcsec_per_year)}″ ${d.motion_north_arcsec_per_year >= 0 ? 'N' : 'S'} per year`]);
-  if (d.catalog_motion_arcsec_per_year != null) rows.push(['Catalogue', `${d.catalog_motion_arcsec_per_year} ″/yr`]);
+  if (d.catalog_motion_arcsec_per_year != null) rows.push(['Catalogue', `${d.catalog_motion_arcsec_per_year}″ a year`]);
   if (d.comparison_stars != null) rows.push(['Compared to', `${d.comparison_stars} other stars in the field`]);
-  if (d.amplitude_ratio != null) rows.push(['Brightness', `×${d.amplitude_ratio} between frames`]);
+  if (d.amplitude_ratio != null) rows.push(['Brightness', `${d.amplitude_ratio}× between the faintest and brightest frame`]);
   $('inspector').innerHTML = `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>
-    <p class="muted small" style="margin:8px 0 0">${d.note || KIND_EXPLAIN[d.kind] || ''}</p>
+    <p class="explain">${d.note || KIND_EXPLAIN[d.kind] || ''}</p>
     <div class="actions">
-      <button class="btn small" id="insZoom">Zoom here</button>
-      <button class="btn small" id="insBlink">Blink first ↔ last</button>
-      <button class="btn small" id="insCopy">Copy coordinates</button>
-      ${S.data.tracked ? '' : '<button class="btn small" id="insSearch">Centre search here</button>'}
+      <button class="btn small" id="insZoom">Zoom in</button>
+      <button class="btn small" id="insBlink">Blink first and last</button>
+      <button class="btn small" id="insCopy">Copy position</button>
+      ${S.data.tracked || !S.apiOk ? '' : '<button class="btn small" id="insSearch">Search around it</button>'}
     </div>`;
   $('insZoom').onclick = () => zoomTo(d.x, d.y, S.data.size >= 48 ? 4 : 2);
   $('insBlink').onclick = () => {
@@ -662,8 +690,8 @@ function selectDetection(id) {
     if (S.A === S.B) S.B = S.view.length - 1;
     fillAB(); updateTicks(); setMode('blink'); play(true);
   };
-  $('insCopy').onclick = () => copyText(`${sky.ra.toFixed(6)} ${sky.dec.toFixed(6)}`);
-  if ($('insSearch')) $('insSearch').onclick = () => goCoords(sky.ra, sky.dec, `${d.id} of ${S.data.target.name || 'field'}`);
+  $('insCopy').onclick = () => copyText(`${sky.ra.toFixed(6)} ${sky.dec.toFixed(6)}`, 'Position copied');
+  if ($('insSearch')) $('insSearch').onclick = () => goCoords(sky.ra, sky.dec, `Near ${S.data.target.name || 'the field'}`);
   draw();
 }
 function zoomTo(x, y, z) {
@@ -676,7 +704,7 @@ function zoomTo(x, y, z) {
 function chartSVG(el, pts, xKey, yLabel, xFmt, xDomain) {
   const W = el.clientWidth || 300, H = el.clientHeight || 100; const m = {l: 44, r: 8, t: 6, b: 18};
   const good = pts.filter((p) => p.flux != null && isFinite(p.flux) && p[xKey] != null);
-  if (good.length < 1) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"><text class="empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${pts.length && pts.every((p) => p.flagged) ? 'Target core is flagged (saturated) in every frame' : 'No measurement at the target'}</text></svg>`; return; }
+  if (good.length < 1) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"><text class="empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">${pts.length && pts.every((p) => p.flagged) ? 'The target is saturated in every frame' : 'No usable measurement at the target'}</text></svg>`; return; }
   const xs = good.map((p) => p[xKey]); let x0 = xDomain ? xDomain[0] : Math.min(...xs), x1 = xDomain ? xDomain[1] : Math.max(...xs);
   if (x1 === x0) { x0 -= 1; x1 += 1; }
   const ys = good.flatMap((p) => [p.flux - (p.err || 0), p.flux + (p.err || 0)]); let y0 = Math.min(...ys), y1 = Math.max(...ys);
@@ -685,28 +713,28 @@ function chartSVG(el, pts, xKey, yLabel, xFmt, xDomain) {
   let s = `<svg viewBox="0 0 ${W} ${H}">`;
   s += `<line class="axisline" x1="${m.l}" y1="${H - m.b}" x2="${W - m.r}" y2="${H - m.b}"/><line class="axisline" x1="${m.l}" y1="${m.t}" x2="${m.l}" y2="${H - m.b}"/>`;
   for (const v of [y0 + pad, (y0 + y1) / 2, y1 - pad]) s += `<text x="${m.l - 4}" y="${Y(v) + 3}" text-anchor="end">${(+v).toPrecision(3)}</text>`;
-  s += `<text x="${m.l + 4}" y="${m.t + 6}" text-anchor="start">${yLabel}</text>`;
   const ticks = 4; for (let i = 0; i <= ticks; i++) { const v = x0 + (x1 - x0) * i / ticks; s += `<text x="${X(v)}" y="${H - 4}" text-anchor="${i === 0 ? 'start' : i === ticks ? 'end' : 'middle'}">${xFmt(v)}</text>`; }
   for (const p of good) {
-    const cx = X(p[xKey]), cy = Y(p.flux); const col = DET_COLOR[p.detector] || '#aaa';
+    const cx = X(p[xKey]), cy = Y(p.flux); const col = '#C9D3D6';
     if (p.err) s += `<line x1="${cx}" x2="${cx}" y1="${Y(p.flux - p.err)}" y2="${Y(p.flux + p.err)}" stroke="${col}" stroke-opacity=".6"/>`;
-    s += `<circle data-frame="${p.frame}" cx="${cx}" cy="${cy}" r="3.4" fill="${p.flagged ? 'none' : col}" stroke="${col}" stroke-width="1.4"><title>${p.frame}\n${fmtNum(p.flux, 3)} ± ${fmtNum(p.err, 3)} mJy${p.flagged ? ' (flagged pixel in aperture)' : ''}</title></circle>`;
+    s += `<circle data-frame="${p.frame}" cx="${cx}" cy="${cy}" r="3.4" fill="${p.flagged ? 'none' : col}" stroke="${col}" stroke-width="1.4"><title>${fmtNum(p.flux, 3)} ± ${fmtNum(p.err, 3)} mJy${p.flagged ? ', saturated or flagged, not reliable' : ''}</title></circle>`;
   }
   el.innerHTML = s + '</svg>';
   el.querySelectorAll('circle').forEach((c) => { c.onclick = () => jumpToFrame(c.dataset.frame); });
 }
 function drawCharts() {
   if (!S.data) return; const ph = S.data.photometry || [];
-  const mjd2date = (v) => { const d = new Date((v - 40587) * 86400000); return d.toISOString().slice(2, 7); };
+  const mj = ph.map((p) => p.mjd); const span = mj.length ? Math.max(...mj) - Math.min(...mj) : 0;
+  const mjd2date = (v) => { const d = new Date((v - 40587) * 86400000).toISOString(); return span < 3 ? d.slice(11, 16) : span < 120 ? d.slice(5, 10) : d.slice(0, 7); };
   chartSVG($('lcChart'), ph, 'mjd', 'mJy', mjd2date);
   chartSVG($('specChart'), ph.map((p) => ({...p, wl: p.wavelength_um})), 'wl', 'mJy', (v) => v.toFixed(1) + 'µm', [0.7, 5.05]);
   const dets = new Set(ph.map((p) => p.detector)); const wl = ph.map((p) => p.wavelength_um).filter((v) => v);
-  $('photNote').textContent = S.data.tracked ? '' : `2 px aperture at the target · each frame is at its own wavelength (${wl.length ? Math.min(...wl).toFixed(2) + '–' + Math.max(...wl).toFixed(2) + ' µm' : '?'}), compare with care`;
+  $('photNote').textContent = `In millijansky, measured in a 2-pixel circle ${S.data.tracked ? 'at the predicted position of the asteroid' : 'at the target'}. Frames span ${wl.length ? Math.min(...wl).toFixed(2) + ' to ' + Math.max(...wl).toFixed(2) + ' µm' : 'several wavelengths'}, so part of the change is colour. Hollow points are saturated.`;
   highlightCharts();
 }
 function highlightCharts() {
   const f = curFrame(); if (!f) return;
-  document.querySelectorAll('.chart circle').forEach((c) => { const on = c.dataset.frame === f.id; c.setAttribute('r', on ? 5.5 : 3.4); c.setAttribute('stroke', on ? '#fff' : c.getAttribute('fill') === 'none' ? c.getAttribute('stroke') : c.getAttribute('fill')); });
+  document.querySelectorAll('.chart circle').forEach((c) => { const on = c.dataset.frame === f.id; c.setAttribute('r', on ? 5.5 : 3.4); c.setAttribute('stroke', on ? '#E5A03A' : '#C9D3D6'); if (c.getAttribute('fill') !== 'none') c.setAttribute('fill', on ? '#E5A03A' : '#C9D3D6'); });
 }
 function jumpToFrame(id) {
   let i = S.view.findIndex((f) => f.id === id);
@@ -721,24 +749,23 @@ function onData(data, opts = {}) {
   S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null;
   S.catalogs = {gaia: null, allwise: null}; S.zoom = 1; S.panX = S.panY = 0;
   if (opts.det != null && S.frames.some((f) => f.detector === opts.det)) S.det = opts.det; else S.det = 0;
-  $('stageMsg').textContent = S.frames.length ? '' : 'No images for this position.';
+  $('stageMsg').textContent = S.frames.length ? '' : 'SPHEREx has no images of this position yet.';
   setSourceBadge(); showNotes(); buildDetList();
-  $('inspector').innerHTML = '<p class="muted">Click a found change (in the list or on the image) to inspect it.</p>';
+  $('inspector').innerHTML = '<p class="muted">Pick a change from the list or click its circle on the image.</p>';
   applyFilter();
   if ($('showGaia').checked) loadCatalog('gaia');
   if ($('showWise').checked) loadCatalog('allwise');
-  const t = data.target; const nm = t.name ? `${t.name} — ` : '';
-  if (S.frames.length < 2) play(false);
-  document.title = `${nm}SPHEREx Explorer`;
-  $('coordInput').placeholder = `${nm}${hms(t.ra)} ${dms(t.dec)}`;
+  const t = data.target;
+  document.title = `${t.name ? t.name + ', ' : ''}SPHEREx Explorer`;
+  markCurrentObject();
   updateURL();
 }
 async function loadStatic(slug, opts = {}) {
-  loading(true, 'Loading prepared images…');
+  loading(true, 'Loading images');
   try {
     const data = await fetchJSON(`data/targets/${slug}.json`);
-    S.query = {slug}; $('datasetSelect').value = slug; onData(data, opts);
-  } catch (e) { toast(`Could not load ${slug}: ${e.message}`); }
+    S.query = {slug}; onData(data, opts);
+  } catch (e) { toast(`Could not load ${slug}. Check the connection and try again.`); }
   finally { loading(false); }
 }
 function angDist(ra1, dec1, ra2, dec2) {
@@ -755,18 +782,18 @@ async function goCoords(ra, dec, name, opts = {}) {
   if (hit && !opts.forceLive) return loadStatic(hit.slug, opts);
   if (!S.apiOk) {
     S.data = null; S.frames = S.view = []; draw();
-    $('stageMsg').innerHTML = `No prepared images at ${hms(ra)} ${dms(dec)}.<br>Live search needs the API server, which is not reachable right now.<br><span class="muted">Try a prepared object, or start the server (see README).</span>`;
+    $('stageMsg').innerHTML = `There are no prepared images at ${hms(ra)} ${dms(dec)}.<br><br>Searching any position needs the live search server, and it is not running on this copy of the site. Pick an object from the list, or start the server as described in the README.`; markCurrentObject();
     return;
   }
-  loading(true, `Asking NASA IRSA for SPHEREx images of ${name || 'this position'}… (first time can take ~30–90 s)`);
+  loading(true, `Asking NASA's IRSA archive for images of ${name || 'this position'}. This can take a minute.`);
   try {
     const url = `${API}/api/frames?ra=${ra.toFixed(6)}&dec=${dec.toFixed(6)}&fov=${fov}&max_frames=30`;
     const data = await fetchJSON(url, {}, 240000);
     if (name) data.target.name = name;
-    S.query = {ra, dec, name}; $('datasetSelect').value = ''; onData(data, opts);
-    toast(`${data.frames.length} images found${data.elapsed_s ? ` in ${data.elapsed_s} s` : ''}`);
+    S.query = {ra, dec, name}; onData(data, opts);
+    toast(`Found ${data.frames.length} images`);
   } catch (e) {
-    $('stageMsg').textContent = `Live search failed: ${e.message}`; S.data = null; S.frames = S.view = []; draw();
+    $('stageMsg').textContent = `The archive did not answer (${e.message}). Try again, or pick a prepared object.`; S.data = null; S.frames = S.view = []; draw();
   } finally { loading(false); }
 }
 async function resolveName(name) {
@@ -787,9 +814,9 @@ async function onSearch(e) {
   e && e.preventDefault(); const text = $('coordInput').value.trim(); if (!text) return;
   const c = parseCoords(text);
   if (c) return goCoords(c.ra, c.dec, null);
-  loading(true, `Looking up "${text}"…`);
+  loading(true, `Looking up ${text}`);
   try { const r = await resolveName(text); loading(false); if (r.slug && S.index.objects.some((o) => o.slug === r.slug)) return loadStatic(r.slug); goCoords(r.ra, r.dec, r.name || text); }
-  catch (err) { loading(false); toast(`Could not understand "${text}". Use RA Dec in degrees or h:m:s d:m:s.`); }
+  catch (err) { loading(false); toast(`No object called “${text}”. Type a name, or RA and Dec in degrees or as 08h55m10s −07d14m42s.`, 5000); }
 }
 async function loadCatalog(cat) {
   if (!S.data || S.data.tracked || S.catalogs[cat]) { draw(); return; }
@@ -803,18 +830,21 @@ async function loadCatalog(cat) {
       const rows = txt.split('\n').filter((l) => l && !l.startsWith('#') && !l.startsWith('-')).map((l) => l.split('\t').map(parseFloat)).filter((r) => isFinite(r[0]) && isFinite(r[1]));
       S.catalogs[cat] = {sources: rows};
     }
-    toast(`${cat === 'gaia' ? 'Gaia DR3' : 'AllWISE'}: ${S.catalogs[cat].sources.length} sources`);
-  } catch (e) { toast(`Catalog not available: ${e.message}`); $(cat === 'gaia' ? 'showGaia' : 'showWise').checked = false; }
+    toast(`${cat === 'gaia' ? 'Gaia DR3' : 'AllWISE'}: ${S.catalogs[cat].sources.length} sources shown`);
+  } catch (e) { toast(`Could not load the ${cat === 'gaia' ? 'Gaia' : 'AllWISE'} catalogue. It needs an internet connection to CDS.`); $(cat === 'gaia' ? 'showGaia' : 'showWise').checked = false; }
   draw();
 }
 
 // ------------------------------------------------------------------ modes, URL, misc
+let thumbTimer = null;
+function renderThumbsSoon() { clearTimeout(thumbTimer); thumbTimer = setTimeout(renderThumbs, 120); }
 function setMode(m) {
   S.mode = m; document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('active', b.dataset.mode === m));
   $('stackOpts').classList.toggle('hidden', m !== 'stack');
   if (S.playing && !['timelapse', 'blink', 'stack'].includes(m)) play(false);
   if (S.playing) play(true);
-  S.zoom = 1; S.panX = S.panY = 0; updateURL(); draw();
+  document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-selected', b.dataset.mode === m ? 'true' : 'false'));
+  S.zoom = 1; S.panX = S.panY = 0; updateURL(); updateStrip(); draw();
 }
 function updateURL() {
   if (!S.data) return; const p = new URLSearchParams();
@@ -824,10 +854,10 @@ function updateURL() {
   if (document.body.classList.contains('embed')) p.set('embed', '1');
   try { history.replaceState(null, '', `${location.pathname}?${p}`); } catch (_) { /* sandboxed viewer */ }
 }
-function copyText(t) { navigator.clipboard?.writeText(t).then(() => toast('Copied'), () => toast(t, 6000)); }
+function copyText(t, done = 'Copied') { navigator.clipboard?.writeText(t).then(() => toast(done), () => toast(t, 6000)); }
 function openModal(id) { $('modal-' + id).classList.remove('hidden'); }
 async function openAladin() {
-  if (!S.data) return toast('Load a sky position first');
+  if (!S.data) return toast('Pick an object first');
   openModal('aladin'); const {ra, dec} = S.data.target; const fov = S.data.size * PIX_ARCSEC / 3600 * 1.6;
   try {
     if (!window.A) {
@@ -837,71 +867,100 @@ async function openAladin() {
     if (!openAladin.al) {
       openAladin.al = window.A.aladin('#aladinDiv', {survey: 'CDS/P/2MASS/color', fov, target: `${ra} ${dec}`, cooFrame: 'ICRS', showReticle: true});
     } else { openAladin.al.gotoRaDec(ra, dec); openAladin.al.setFoV(fov); openAladin.al.removeLayers?.(); }
-    openAladin.al.addCatalog(window.A.catalogFromVizieR('I/355/gaiadr3', `${ra} ${dec}`, fov / 2, {name: 'Gaia DR3', color: '#7fd3ff', onClick: 'showTable'}));
-    openAladin.al.addCatalog(window.A.catalogFromVizieR('II/328/allwise', `${ra} ${dec}`, fov / 2, {name: 'AllWISE', color: '#ffb454', onClick: 'showTable'}));
-  } catch (e) { $('aladinDiv').innerHTML = '<p class="muted" style="padding:20px">Aladin Lite could not be loaded (no internet access to CDS?).</p>'; }
+    openAladin.al.addCatalog(window.A.catalogFromVizieR('I/355/gaiadr3', `${ra} ${dec}`, fov / 2, {name: 'Gaia DR3', color: '#5CB3D6', onClick: 'showTable'}));
+    openAladin.al.addCatalog(window.A.catalogFromVizieR('II/328/allwise', `${ra} ${dec}`, fov / 2, {name: 'AllWISE', color: '#E5A03A', onClick: 'showTable'}));
+  } catch (e) { $('aladinDiv').innerHTML = '<p class="muted" style="padding:20px">The sky atlas did not load. It needs an internet connection to CDS in Strasbourg.</p>'; }
 }
 async function checkApi() {
   try { await fetchJSON(`${API}/api/health`, {}, 5000); S.apiOk = true; } catch (_) { S.apiOk = false; }
   const b = $('apiBadge'); b.className = 'badge ' + (S.apiOk ? 'live' : 'dim');
-  b.textContent = S.apiOk ? 'live search: on' : 'live search: off'; b.title = S.apiOk ? 'Any coordinates can be searched live in the IRSA archive' : 'API server not reachable: only prepared objects can be shown';
+  b.textContent = S.apiOk ? 'Live search on' : 'Prepared objects only'; b.title = S.apiOk ? 'Any position can be searched in the IRSA archive' : 'The live search server is not running here, so only the objects in the list can be shown';
+}
+const GROUPS = [
+  ['challenge', 'Challenge targets'],
+  ['moving', 'Asteroids'],
+  ['variable', 'Variable stars'],
+  ['stable', 'Comparison stars'],
+];
+function objectBlurb(o) {
+  if (o.class === 'challenge') {
+    const t = (S.index.official_targets || []).find((q) => q.slug === o.slug);
+    return t ? t.kind.charAt(0).toUpperCase() + t.kind.slice(1) : '';
+  }
+  if (o.kinds && o.kinds.length && o.class !== 'moving') return o.kinds.map((k) => KIND_LABEL[k].toLowerCase()).join(', ');
+  return '';
+}
+function buildObjectList() {
+  const box = $('objectList'); const q = $('objectFilter').value.trim().toLowerCase();
+  box.innerHTML = '';
+  const objs = S.index.objects.filter((o) => !q || o.name.toLowerCase().includes(q));
+  const groups = [...GROUPS];
+  if (objs.some((o) => o.demo)) groups.push(['__demo', 'Synthetic test data']);
+  for (const [key, title] of groups) {
+    const list = objs.filter((o) => (key === '__demo' ? o.demo : !o.demo && o.class === key));
+    if (!list.length) continue;
+    const h = document.createElement('div'); h.className = 'objgroup';
+    h.innerHTML = `<span>${title}</span><span>${list.length}</span>`; box.appendChild(h);
+    for (const o of list) {
+      const b = document.createElement('button'); b.className = 'obj'; b.type = 'button'; b.dataset.slug = o.slug;
+      b.setAttribute('role', 'listitem');
+      const blurb = objectBlurb(o);
+      b.innerHTML = `<span>${o.name}</span><span class="on">${o.frames} frame${o.frames === 1 ? '' : 's'}</span>` +
+        (blurb ? `<span class="what">${blurb}</span>` : '');
+      b.onclick = () => loadStatic(o.slug);
+      box.appendChild(b);
+    }
+  }
+  if (!box.children.length) box.innerHTML = `<p class="hint">Nothing in the list matches “${$('objectFilter').value}”. To look anywhere on the sky, type its position in the search box at the top.</p>`;
+  markCurrentObject();
+}
+function markCurrentObject() {
+  const slug = S.query && S.query.slug;
+  document.querySelectorAll('#objectList .obj').forEach((b) => b.setAttribute('aria-current', b.dataset.slug === slug ? 'true' : 'false'));
 }
 async function loadIndex() {
   try { S.index = await fetchJSON('data/index.json', {}, 20000); } catch (_) { S.index = {objects: [], official_targets: []}; }
-  const sel = $('datasetSelect'); sel.innerHTML = '<option value="">— choose —</option>';
-  const groups = {};
-  for (const o of S.index.objects) { const g = o.demo ? 'Synthetic demo (not real data)' : ({challenge: 'Challenge test targets', moving: 'Asteroids (frames follow the object)', variable: 'Variable stars', stable: 'Comparison stars'}[o.class] || o.class); (groups[g] = groups[g] || []).push(o); }
-  for (const [g, list] of Object.entries(groups)) {
-    const og = document.createElement('optgroup'); og.label = g;
-    for (const o of list) { const op = document.createElement('option'); op.value = o.slug; op.textContent = `${o.name} (${o.frames} frame${o.frames === 1 ? '' : 's'}${o.size ? ', ' + o.size + ' px' : ''})`; og.appendChild(op); }
-    sel.appendChild(og);
-  }
-  const box = $('officialTargets'); box.innerHTML = '';
-  for (const t of S.index.official_targets || []) {
-    const b = document.createElement('button'); b.className = 'chip'; b.textContent = t.name; b.title = `${t.kind}\n${hms(t.ra)} ${dms(t.dec)}\n${t.note || ''}`;
-    const have = S.index.objects.some((o) => o.slug === t.slug);
-    b.onclick = () => { $('coordInput').value = `${t.ra.toFixed(5)} ${t.dec.toFixed(5)}`; have ? loadStatic(t.slug) : goCoords(t.ra, t.dec, t.name); }; box.appendChild(b);
-  }
+  buildObjectList();
 }
 
 // ------------------------------------------------------------------ wire up UI
 function wire() {
   $('searchForm').addEventListener('submit', onSearch);
-  $('datasetSelect').addEventListener('change', (e) => e.target.value && loadStatic(e.target.value));
+  $('objectFilter').addEventListener('input', buildObjectList);
   $('fovSelect').addEventListener('change', () => { if (S.query && !S.query.slug) goCoords(S.query.ra, S.query.dec, S.query.name); });
   document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
   $('obsA').addEventListener('change', (e) => { S.A = +e.target.value; updateTicks(); draw(); });
   $('obsB').addEventListener('change', (e) => { S.B = +e.target.value; updateTicks(); draw(); });
   $('analyzeBtn').addEventListener('click', () => {
-    if (!S.data) return toast('Load a sky position first');
+    if (!S.data) return toast('Pick an object first');
     $('showDetections').checked = true;
     const dets = S.data.detections || []; const a = frameA(), b = frameB();
     const inAB = dets.filter((d) => d.frames.includes(a.id) || d.frames.includes(b.id)).length;
-    if (S.mode === 'timelapse') setMode('blink'); else draw();
-    toast(dets.length ? `${dets.length} change(s) found in this field — ${inAB} involve A or B` : 'No significant change found');
+    if (S.mode !== 'blink') setMode('blink'); play(true);
+    toast(dets.length ? `Blinking A and B. ${inAB} of ${dets.length} changes involve these two frames.` : 'Blinking A and B. Nothing was flagged in this field.');
     if (dets.length) selectDetection(dets[0].id);
   });
   $('playBtn').addEventListener('click', () => play());
   $('prevBtn').addEventListener('click', () => { play(false); setFrame(S.cur - 1); });
   $('nextBtn').addEventListener('click', () => { play(false); setFrame(S.cur + 1); });
-  $('frameSlider').addEventListener('input', (e) => { play(false); setFrame(+e.target.value); });
   $('speedSelect').addEventListener('change', () => S.playing && play(true));
   document.querySelectorAll('input[name=stackKind]').forEach((r) => r.addEventListener('change', draw));
-  for (const id of ['stretchSelect', 'cmapSelect', 'brightness', 'contrast', 'gamma', 'showDetections', 'showFlags', 'showCross']) $(id).addEventListener('input', draw);
-  for (const id of ['layerSelect', 'clipSelect', 'lockScale', 'smoothChk', 'repairChk']) $(id).addEventListener('input', () => { S.scaleCache.clear(); draw(); });
+  for (const id of ['stretchSelect', 'cmapSelect', 'brightness', 'contrast', 'gamma']) $(id).addEventListener('input', () => { draw(); renderThumbsSoon(); });
+  for (const id of ['showDetections', 'showFlags', 'showCross']) $(id).addEventListener('input', draw);
+  for (const id of ['layerSelect', 'clipSelect', 'lockScale', 'smoothChk', 'repairChk']) $(id).addEventListener('input', () => { S.scaleCache.clear(); draw(); renderThumbsSoon(); });
   $('showGaia').addEventListener('change', (e) => e.target.checked ? loadCatalog('gaia') : draw());
   $('showWise').addEventListener('change', (e) => e.target.checked ? loadCatalog('allwise') : draw());
   $('resetBtn').addEventListener('click', () => {
-    $('stretchSelect').value = 'asinh'; $('clipSelect').value = '99.5'; $('cmapSelect').value = 'inferno'; $('layerSelect').value = 'clean';
+    $('stretchSelect').value = 'asinh'; $('clipSelect').value = '99.5'; $('cmapSelect').value = 'plate'; $('layerSelect').value = 'clean';
     $('brightness').value = 0; $('contrast').value = 1; $('gamma').value = 1; $('lockScale').checked = true; $('smoothChk').checked = false; $('repairChk').checked = true;
-    S.zoom = 1; S.panX = S.panY = 0; S.scaleCache.clear(); draw();
+    S.zoom = 1; S.panX = S.panY = 0; S.scaleCache.clear(); draw(); renderThumbs();
   });
   $('aladinBtn').addEventListener('click', openAladin);
   $('zoomIn').onclick = () => { S.zoom = clamp(S.zoom * 1.4, 0.5, 16); draw(); };
   $('zoomOut').onclick = () => { S.zoom = clamp(S.zoom / 1.4, 0.5, 16); draw(); };
   $('zoomReset').onclick = () => { S.zoom = 1; S.panX = S.panY = 0; draw(); };
   $('fullscreenBtn').onclick = () => { const c = document.querySelector('.center'); document.fullscreenElement ? document.exitFullscreen() : c.requestFullscreen?.(); };
-  $('collapseRight').onclick = () => { document.querySelector('.layout').classList.toggle('right-collapsed'); };
+  $('collapseRight').onclick = () => { const c = document.querySelector('.layout').classList.toggle('right-collapsed'); $('collapseRight').setAttribute('aria-label', c ? 'Show display settings' : 'Hide display settings'); };
   document.querySelectorAll('[data-modal]').forEach((b) => b.addEventListener('click', () => openModal(b.dataset.modal)));
   document.querySelectorAll('.modal').forEach((m) => m.addEventListener('click', (e) => { if (e.target === m || e.target.hasAttribute('data-close')) m.classList.add('hidden'); }));
   document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', () => copyText($(b.dataset.copy).value)));
@@ -912,7 +971,9 @@ function wire() {
     openModal('share');
   });
   document.addEventListener('keydown', (e) => {
-    if (e.target.matches('input[type=text], select')) return;
+    if (e.key === 'Escape') { document.querySelectorAll('.modal').forEach((m) => m.classList.add('hidden')); return; }
+    if (e.target.matches('input, select, textarea')) return;
+    if (e.key === ' ' && e.target.matches('button, [tabindex]')) return;
     if (e.key === ' ') { e.preventDefault(); play(); }
     else if (e.key === 'ArrowRight') { play(false); setFrame(S.cur + 1); }
     else if (e.key === 'ArrowLeft') { play(false); setFrame(S.cur - 1); }
@@ -934,6 +995,10 @@ async function init() {
   else if (S.index.objects.length) {
     const first = S.index.objects.find((o) => o.class === 'challenge') || S.index.objects.find((o) => !o.demo) || S.index.objects[0];
     await loadStatic(first.slug);
+  }
+  // play the first object once through on arrival, unless the visitor prefers less motion
+  if (S.data && S.view.length > 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !p.get('mode')) {
+    play(true); setTimeout(() => { if (S.playing) { play(false); setFrame(0); } }, 1000 / +$('speedSelect').value * S.view.length + 200);
   }
 }
 init();

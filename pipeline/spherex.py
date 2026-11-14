@@ -678,8 +678,8 @@ def build_payload(frames: list[Frame], ra: float, dec: float, size_px: int,
     n_flag = sum(1 for p in phot if p["flagged"])
     if not tracked and len(phot) and n_flag >= max(1, len(phot) // 2) and any(
             (f.meta.get("flag_counts") or {}).get("OVERFLOW", 0) >= 2 for f in frames):
-        notes.append(f"The target is very bright: pixels of its core are flagged (overflow / saturation) in {n_flag} of "
-                     f"{len(phot)} frames, so its brightness values here are not reliable (hollow points in the charts).")
+        notes.append(f"This object is so bright that the centre of its image is saturated in {n_flag} of {len(phot)} frames. "
+                     f"Its brightness values here are not reliable; they show as hollow points in the charts.")
     payload = {
         "version": 2,
         "target": {"name": name, "ra": target["ra"] if target else ra, "dec": target["dec"] if target else dec,
@@ -769,7 +769,7 @@ def fetch_live(ra: float, dec: float, size_px: int = 64, detector: int | None = 
         total = len(obs)
         obs = pick_spread(obs, max_frames)
         if total > len(obs):
-            notes.append(f"{total} observations cover this point; showing {len(obs)} spread over time.")
+            notes.append(f"SPHEREx has {total} images of this point. Showing {len(obs)} of them, spread evenly in time.")
         size_deg = size_px * PIXSCALE_ARCSEC / 3600 * 1.45  # margin for rotated detectors
 
         def job(o):
@@ -790,5 +790,5 @@ def fetch_live(ra: float, dec: float, size_px: int = 64, detector: int | None = 
                     if f is not None:
                         frames.append(f)
                 except Exception as e:  # one bad cutout should not kill the request
-                    notes.append(f"skipped one cutout: {type(e).__name__}")
+                    notes.append(f"One image could not be downloaded ({type(e).__name__}) and was skipped.")
     return build_payload(frames, ra, dec, size_px, name=name, source="IRSA live", notes=notes)

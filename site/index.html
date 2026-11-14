@@ -3,278 +3,277 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SPHEREx Explorer — watch the infrared sky change</title>
-<meta name="description" content="Enter sky coordinates and watch NASA SPHEREx infrared images of that patch play like a little video. Spot moving and changing objects.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%2213%22 fill=%22none%22 stroke=%22%235aa9ff%22 stroke-width=%223%22/%3E%3Ccircle cx=%2216%22 cy=%2216%22 r=%224%22 fill=%22%235aa9ff%22/%3E%3C/svg%3E">
+<title>SPHEREx Explorer</title>
+<meta name="description" content="Type a position on the sky and play every NASA SPHEREx infrared image of it in time order. Things that move or change brightness stand out.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect x=%223%22 y=%226%22 width=%2226%22 height=%2220%22 rx=%222%22 fill=%22%23E3EAEC%22/%3E%3Ccircle cx=%2213%22 cy=%2216%22 r=%222.4%22 fill=%22%2310171A%22/%3E%3Ccircle cx=%2221%22 cy=%2212%22 r=%221.4%22 fill=%22%23E5A03A%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">
-    <svg viewBox="0 0 32 32" class="logo" aria-hidden="true"><circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2"/><ellipse cx="16" cy="16" rx="13" ry="5" fill="none" stroke="currentColor" stroke-width="1.4" transform="rotate(-25 16 16)"/><circle cx="16" cy="16" r="3" fill="currentColor"/><circle cx="26" cy="9" r="1.6" fill="#ffb454"/></svg>
-    <div>
-      <div class="brand-name">SPHEREx Explorer</div>
-      <div class="brand-sub">watch the infrared sky change</div>
-    </div>
-  </div>
-  <nav class="topnav">
-    <button class="navbtn active" data-view="explore">Explore</button>
+  <a class="brand" href="./" aria-label="SPHEREx Explorer, start page">
+    <svg viewBox="0 0 32 32" class="logo" aria-hidden="true"><rect x="3" y="6" width="26" height="20" rx="2" fill="#E3EAEC"/><circle cx="13" cy="16" r="2.4" fill="#10171A"/><circle cx="21" cy="12" r="1.4" fill="#E5A03A"/></svg>
+    <span class="brand-name">SPHEREx Explorer</span>
+  </a>
+  <form id="searchForm" class="search" role="search">
+    <label for="coordInput" class="sr-only">Sky position or object name</label>
+    <input id="coordInput" type="text" autocomplete="off" spellcheck="false"
+           placeholder="RA and Dec, or a name. For example 08h55m10.8s −07d14m42s, or 133.795 −7.245">
+    <button class="btn primary" type="submit">Show</button>
+  </form>
+  <nav class="topnav" aria-label="Help">
     <button class="navbtn" data-modal="how">How it works</button>
     <button class="navbtn" data-modal="about">About</button>
   </nav>
   <div class="status">
-    <span id="sourceBadge" class="badge">no data</span>
-    <span id="apiBadge" class="badge dim" title="Live search server">live: checking…</span>
-    <button id="shareBtn" class="btn ghost small" title="Copy a link to this view">Share / embed</button>
+    <span id="sourceBadge" class="badge">No data loaded</span>
+    <span id="apiBadge" class="badge dim" title="Search for any coordinates">Live search: checking</span>
+    <button id="shareBtn" class="btn ghost small">Share</button>
   </div>
 </header>
 
 <main class="layout">
-  <!-- LEFT: observation controls -->
-  <aside class="panel left" aria-label="Observation controls">
-    <h2>Observation controls</h2>
-
-    <section class="block">
-      <label class="lbl" for="coordInput">Sky position</label>
-      <form id="searchForm" class="search">
-        <input id="coordInput" type="text" autocomplete="off" spellcheck="false"
-               placeholder="08h55m10.8s −07d14m42s · 133.795 −7.245 · R Dra">
-        <button class="btn primary" type="submit">Go</button>
-      </form>
-      <div class="hint">Right Ascension &amp; Declination (degrees or h:m:s d:m:s) or an object name.</div>
+  <!-- LEFT: what to look at -->
+  <aside class="panel left" aria-label="Objects and frame selection">
+    <section class="block grow">
+      <h2>Objects</h2>
+      <label for="objectFilter" class="sr-only">Filter objects</label>
+      <input id="objectFilter" type="text" placeholder="Filter the list" autocomplete="off">
+      <div id="objectList" class="objlist" role="list"></div>
     </section>
 
     <section class="block">
-      <div class="lbl">Challenge test targets</div>
-      <div id="officialTargets" class="chips"></div>
-    </section>
-
-    <section class="block">
-      <label class="lbl" for="datasetSelect">Prepared objects</label>
-      <select id="datasetSelect"></select>
-    </section>
-
-    <section class="block">
-      <label class="lbl" for="fovSelect">Field of view</label>
-      <select id="fovSelect">
-        <option value="32">3.3′ (32 px) — fastest</option>
-        <option value="64" selected>6.6′ (64 px)</option>
-        <option value="96">9.8′ (96 px)</option>
-        <option value="128">13.1′ (128 px) — fast movers, slower</option>
-      </select>
-    </section>
-
-    <section class="block">
-      <div class="lbl">Detector array (wavelength)</div>
+      <h2>Field</h2>
+      <label class="row"><span>Size</span>
+        <select id="fovSelect">
+          <option value="32">3.3′ wide, fastest</option>
+          <option value="64" selected>6.6′ wide</option>
+          <option value="96">9.8′ wide</option>
+          <option value="128">13.1′ wide, for fast movers</option>
+        </select>
+      </label>
+      <div class="sub">Detector array</div>
       <div id="detectorChips" class="chips det"></div>
-      <div class="hint" id="detHint">Each of SPHEREx's 6 detector arrays sees a different slice of 0.75–5 µm.</div>
+      <p class="hint" id="detHint"></p>
     </section>
 
     <section class="block">
-      <div class="lbl">Compare observations</div>
+      <h2>Compare two frames</h2>
       <div class="ab">
-        <label>A <select id="obsA"></select></label>
-        <label>B <select id="obsB"></select></label>
+        <label><span class="abtag">A</span><select id="obsA"></select></label>
+        <label><span class="abtag">B</span><select id="obsB"></select></label>
       </div>
-      <button id="analyzeBtn" class="btn primary wide">Analyze changes</button>
+      <button id="analyzeBtn" class="btn wide">Blink A and B</button>
     </section>
   </aside>
 
-  <!-- CENTER: viewer -->
-  <section class="panel center" aria-label="Observation viewer">
-    <div class="viewer-head">
-      <div class="modes" role="tablist">
-        <button class="mode active" data-mode="timelapse" title="Play all images like a little video">Time-lapse</button>
-        <button class="mode" data-mode="blink" title="Flip between A and B">Blink A/B</button>
-        <button class="mode" data-mode="side" title="A and B next to each other">Side by side</button>
-        <button class="mode" data-mode="swipe" title="Drag the divider to reveal B over A">Swipe</button>
-        <button class="mode" data-mode="diff" title="A minus B: what changed shows as red/blue">Difference</button>
-        <button class="mode" data-mode="stack" title="Add images together">Stack</button>
-      </div>
-      <div class="view-tools">
-        <button class="btn ghost small" id="zoomOut" title="Zoom out">−</button>
-        <button class="btn ghost small" id="zoomReset" title="Fit">fit</button>
-        <button class="btn ghost small" id="zoomIn" title="Zoom in">+</button>
-        <button class="btn ghost small" id="fullscreenBtn" title="Fullscreen">⤢</button>
-      </div>
-    </div>
-
+  <!-- CENTER: the lightbox -->
+  <section class="center" aria-label="Image viewer">
     <div class="stage-wrap" id="stageWrap">
-      <canvas id="stage"></canvas>
-      <div class="stage-msg" id="stageMsg">Pick a test target or type coordinates to start.</div>
-      <div class="frame-label" id="frameLabel"></div>
+      <canvas id="stage" aria-label="SPHEREx image of the selected field"></canvas>
+      <div class="stage-msg" id="stageMsg">Pick an object on the left or type a position above.</div>
+      <div class="frame-label" id="frameLabel" aria-live="polite"></div>
       <div class="readout" id="readout"></div>
-      <div class="loading hidden" id="loading"><div class="spinner"></div><span id="loadingText">Loading…</span></div>
+      <div class="view-tools">
+        <button class="btn icon" id="zoomOut" aria-label="Zoom out">−</button>
+        <button class="btn icon" id="zoomReset" aria-label="Fit image">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+        <button class="btn icon" id="zoomIn" aria-label="Zoom in">+</button>
+        <button class="btn icon" id="fullscreenBtn" aria-label="Full screen">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2l4 4M14 2l-4 4M2 14l4-4M14 14l-4-4" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+      <div class="loading hidden" id="loading"><div class="spinner"></div><span id="loadingText">Loading</span></div>
     </div>
 
-    <div class="player" id="player">
-      <button class="btn icon" id="prevBtn" title="Previous (←)">⏮</button>
-      <button class="btn icon play" id="playBtn" title="Play / pause (space)">▶</button>
-      <button class="btn icon" id="nextBtn" title="Next (→)">⏭</button>
-      <div class="timeline">
-        <div class="ticks" id="ticks"></div>
-        <input type="range" id="frameSlider" min="0" max="0" value="0" aria-label="Frame">
-        <div class="axis" id="axis"></div>
+    <div class="deck">
+      <div class="modes" role="tablist" aria-label="View">
+        <button class="mode active" data-mode="timelapse" role="tab">Time-lapse</button>
+        <button class="mode" data-mode="blink" role="tab">Blink</button>
+        <button class="mode" data-mode="side" role="tab">Side by side</button>
+        <button class="mode" data-mode="swipe" role="tab">Swipe</button>
+        <button class="mode" data-mode="diff" role="tab">Difference</button>
+        <button class="mode" data-mode="stack" role="tab">Stack</button>
       </div>
-      <label class="speed">speed
-        <select id="speedSelect"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option><option value="8">8 fps</option></select>
-      </label>
-    </div>
-    <div class="stack-opts hidden" id="stackOpts">
-      <label><input type="radio" name="stackKind" value="mean" checked> Mean (more signal, less noise)</label>
-      <label><input type="radio" name="stackKind" value="max"> Max (moving objects leave a trail)</label>
-      <label><input type="radio" name="stackKind" value="resid"> Current − mean (what is different now)</label>
+      <div class="stack-opts hidden" id="stackOpts">
+        <label><input type="radio" name="stackKind" value="mean" checked> Average (less noise)</label>
+        <label><input type="radio" name="stackKind" value="max"> Brightest pixel (movers leave a trail)</label>
+        <label><input type="radio" name="stackKind" value="resid"> This frame minus the average</label>
+      </div>
+      <div class="player" id="player">
+        <div class="transport">
+          <button class="btn icon" id="prevBtn" aria-label="Previous frame">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </button>
+          <button class="btn icon play" id="playBtn" aria-label="Play">
+            <svg viewBox="0 0 16 16" aria-hidden="true" class="i-play"><path d="M4 2.5v11L13 8z" fill="currentColor"/></svg>
+            <svg viewBox="0 0 16 16" aria-hidden="true" class="i-pause"><path d="M4 2.5h3v11H4zM9 2.5h3v11H9z" fill="currentColor"/></svg>
+          </button>
+          <button class="btn icon" id="nextBtn" aria-label="Next frame">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </button>
+          <label class="speed"><span class="sr-only">Speed</span>
+            <select id="speedSelect"><option value="1">1 frame/s</option><option value="2" selected>2 frames/s</option><option value="4">4 frames/s</option><option value="8">8 frames/s</option></select>
+          </label>
+        </div>
+        <div class="strip" id="strip" role="listbox" aria-label="Frames in time order"></div>
+      </div>
     </div>
   </section>
 
-  <!-- RIGHT: image settings -->
-  <aside class="panel right" aria-label="Image settings" id="rightPanel">
-    <h2>Image settings <button class="collapse" id="collapseRight" title="Collapse">›</button></h2>
+  <!-- RIGHT: display -->
+  <aside class="panel right" aria-label="Display settings" id="rightPanel">
+    <h2>Display <button class="collapse" id="collapseRight" aria-label="Hide display settings">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button></h2>
 
     <section class="block">
-      <label class="lbl" for="layerSelect">Show</label>
+      <label class="stack-lbl" for="cmapSelect">Colours</label>
+      <select id="cmapSelect">
+        <option value="plate" selected>Plate (dark stars on light)</option>
+        <option value="gray">Grey (light stars on dark)</option>
+        <option value="inferno">Inferno</option>
+        <option value="ice">Ice</option>
+      </select>
+      <div class="cbar" id="cbar"></div>
+    </section>
+
+    <section class="block">
+      <label class="stack-lbl" for="layerSelect">Layer</label>
       <select id="layerSelect">
-        <option value="clean" selected>Sky (zodiacal light &amp; background removed)</option>
-        <option value="image">Sky (as observed)</option>
+        <option value="clean" selected>Sky, background removed</option>
+        <option value="image">Sky as recorded</option>
         <option value="zodi">Zodiacal light model</option>
-        <option value="noise">Noise / uncertainty map</option>
-        <option value="quality">Quality mask (flagged pixels)</option>
+        <option value="noise">Noise estimate</option>
+        <option value="quality">Flagged pixels</option>
       </select>
     </section>
 
-    <section class="block">
-      <label class="lbl" for="stretchSelect">Image stretch</label>
-      <select id="stretchSelect">
-        <option value="asinh" selected>asinh (good default)</option>
-        <option value="linear">linear</option>
-        <option value="sqrt">square root</option>
-        <option value="log">logarithmic</option>
-      </select>
-    </section>
-
-    <section class="block">
-      <label class="lbl" for="clipSelect">Range</label>
-      <select id="clipSelect">
-        <option value="99.5" selected>99.5%</option>
-        <option value="99">99%</option>
-        <option value="98">98%</option>
-        <option value="95">95%</option>
-        <option value="100">min–max</option>
-      </select>
-      <label class="check"><input type="checkbox" id="lockScale" checked> same scale for all frames</label>
+    <section class="block two">
+      <label class="stack-lbl">Stretch
+        <select id="stretchSelect">
+          <option value="asinh" selected>asinh</option>
+          <option value="linear">linear</option>
+          <option value="sqrt">square root</option>
+          <option value="log">log</option>
+        </select>
+      </label>
+      <label class="stack-lbl">Clip at
+        <select id="clipSelect">
+          <option value="99.5" selected>99.5 %</option>
+          <option value="99">99 %</option>
+          <option value="98">98 %</option>
+          <option value="95">95 %</option>
+          <option value="100">min to max</option>
+        </select>
+      </label>
     </section>
 
     <section class="block sliders">
       <label>Brightness <input type="range" id="brightness" min="-0.5" max="0.5" step="0.01" value="0"></label>
       <label>Contrast <input type="range" id="contrast" min="0.3" max="3" step="0.01" value="1"></label>
       <label>Gamma <input type="range" id="gamma" min="0.3" max="3" step="0.01" value="1"></label>
+      <label class="check"><input type="checkbox" id="lockScale" checked> Same brightness scale for every frame</label>
     </section>
 
     <section class="block">
-      <label class="lbl" for="cmapSelect">Color map</label>
-      <select id="cmapSelect">
-        <option value="inferno" selected>inferno</option>
-        <option value="gray">gray</option>
-        <option value="viridis">viridis</option>
-        <option value="ice">ice</option>
-      </select>
-      <div class="cbar" id="cbar"></div>
-    </section>
-
-    <section class="block">
-      <div class="lbl">Overlays</div>
-      <label class="check"><input type="checkbox" id="showDetections" checked> changes found</label>
-      <label class="check"><input type="checkbox" id="showFlags"> flagged pixels</label>
-      <label class="check"><input type="checkbox" id="showCross" checked> target crosshair</label>
+      <div class="stack-lbl">Show on the image</div>
+      <label class="check"><input type="checkbox" id="showDetections" checked> Changes found</label>
+      <label class="check"><input type="checkbox" id="showCross" checked> Target position</label>
+      <label class="check"><input type="checkbox" id="showFlags"> Flagged pixels in red</label>
       <label class="check"><input type="checkbox" id="showGaia"> Gaia DR3 stars</label>
       <label class="check"><input type="checkbox" id="showWise"> AllWISE sources</label>
-      <label class="check" title="Display only: small groups of flagged pixels (cosmic-ray hits, dead pixels) are replaced by the median of their neighbours; saturated star cores are left as they are"><input type="checkbox" id="repairChk" checked> hide small flagged spots</label>
-      <label class="check"><input type="checkbox" id="smoothChk"> smooth 1 px (less noise)</label>
+      <label class="check" title="Only changes the picture: small groups of flagged pixels are filled from their neighbours. Saturated star cores are left alone."><input type="checkbox" id="repairChk" checked> Fill cosmic-ray hits</label>
+      <label class="check"><input type="checkbox" id="smoothChk"> Smooth by 1 pixel</label>
     </section>
 
-    <section class="block">
-      <button class="btn ghost wide" id="resetBtn">Reset</button>
-      <button class="btn ghost wide" id="aladinBtn">Open in sky atlas (Aladin)</button>
+    <section class="block actions">
+      <button class="btn ghost wide" id="resetBtn">Reset display</button>
+      <button class="btn ghost wide" id="aladinBtn">Open in Aladin sky atlas</button>
     </section>
   </aside>
 
-  <!-- BOTTOM: results -->
+  <!-- BOTTOM: what the computer found -->
   <section class="panel bottom" aria-label="Results">
-    <div class="results">
-      <div class="res-col">
-        <h2>Changes found <span class="count" id="detCount">0</span></h2>
-        <div class="legend">
-          <span><i class="k moving"></i>moving</span>
-          <span><i class="k shifted"></i>shifted (proper motion)</span>
-          <span><i class="k variable"></i>brightness change</span>
-          <span><i class="k transient"></i>one-frame spot</span>
-        </div>
-        <ul class="det-list" id="detList"></ul>
-      </div>
-      <div class="res-col">
-        <h2>Object inspector</h2>
-        <div id="inspector" class="inspector"><p class="muted">Click a found change (in the list or on the image) to inspect it.</p></div>
-      </div>
-      <div class="res-col charts">
-        <h2>Target over time <span class="muted small" id="photNote"></span></h2>
-        <div class="chart" id="lcChart"></div>
-        <h2>Target spectrum <span class="muted small">built on the fly from every frame</span></h2>
-        <div class="chart" id="specChart"></div>
-      </div>
-      <div class="res-col">
-        <h2>This frame</h2>
-        <div id="frameMeta" class="meta"></div>
-        <div id="notes" class="notes"></div>
-      </div>
+    <div class="res-col">
+      <h2>Changes found <span class="count" id="detCount">0</span></h2>
+      <ul class="legend" aria-label="Legend">
+        <li><i class="k moving"></i>moving</li>
+        <li><i class="k shifted"></i>shifted position</li>
+        <li><i class="k variable"></i>brightness change</li>
+        <li><i class="k transient"></i>single-frame spot</li>
+      </ul>
+      <ul class="det-list" id="detList"></ul>
+    </div>
+    <div class="res-col">
+      <h2>Selected change</h2>
+      <div id="inspector" class="inspector"></div>
+    </div>
+    <div class="res-col charts">
+      <h2>Target brightness over time</h2>
+      <p class="hint" id="photNote"></p>
+      <div class="chart" id="lcChart"></div>
+      <h2>Target spectrum</h2>
+      <p class="hint">Each frame is taken at its own wavelength, so all frames together give a spectrum.</p>
+      <div class="chart" id="specChart"></div>
+    </div>
+    <div class="res-col">
+      <h2>This frame</h2>
+      <div id="frameMeta" class="meta"></div>
+      <div id="notes" class="notes"></div>
     </div>
   </section>
 </main>
 
-<!-- Modals -->
-<div class="modal hidden" id="modal-how" role="dialog" aria-modal="true">
-  <div class="modal-box">
-    <button class="modal-close" data-close>×</button>
-    <h2>How it works</h2>
-    <ol class="how">
-      <li><b>You choose a patch of sky.</b> Type Right Ascension and Declination (or a name) — the same way astronomers point a telescope.</li>
-      <li><b>We find every SPHEREx picture of that spot.</b> NASA's SPHEREx telescope maps the whole sky every six months in 102 colours of infrared light. The tool asks NASA's IRSA archive which images contain your position and cuts out a small square around it.</li>
-      <li><b>All pictures are lined up.</b> SPHEREx looks at the sky at different angles each time, so every cut-out is rotated so that north is up and east is left, and resampled to the same grid. Now stars stay in place — and anything that <i>moves</i> really moves on screen.</li>
-      <li><b>Bad pixels and glow are handled.</b> Pixels hit by cosmic rays or dead pixels (SPHEREx FLAGS) are marked; the glow of dust in the Solar System (zodiacal light, the ZODI layer) can be removed.</li>
-      <li><b>Play it like a video.</b> Your eyes are great at spotting motion: this is exactly how Pluto was found in 1930, and how volunteers discover brown dwarfs today.</li>
-      <li><b>The computer looks too.</b> An algorithm compares the frames and marks objects that move along a straight line, stars whose centre drifts steadily (proper motion of at least 2.5″ per year), and sources whose brightness changes compared with the other stars of the field. It gives a score, not a verdict — you decide.</li>
-      <li><b>Limits you should know.</b> One SPHEREx pixel is 6.15″, so in about a year of data only the fastest stars move by a pixel. Very bright stars saturate the detector (their core is flagged) and very faint objects are below the noise of a single image.</li>
+<!-- Dialogs -->
+<div class="modal hidden" id="modal-how" role="dialog" aria-modal="true" aria-labelledby="howTitle">
+  <div class="modal-box prose">
+    <button class="modal-close" data-close aria-label="Close">×</button>
+    <h2 id="howTitle">How it works</h2>
+    <p>In 1930 Clyde Tombaugh found Pluto by flipping between two photographs of the same patch of sky and noticing one dot that had moved. This tool does the same with images from NASA's SPHEREx telescope, which has photographed the whole sky in infrared every six months since 2025.</p>
+    <h3>What happens when you type a position</h3>
+    <ol>
+      <li>The tool asks NASA's IRSA archive for every SPHEREx image that contains the position and downloads a small square around it.</li>
+      <li>SPHEREx photographs the sky at a different angle each time, so each square is rotated to put north up and redrawn on the same grid. Stars stay put; anything that moves, moves on screen.</li>
+      <li>Pixels hit by cosmic rays, dead pixels and saturated pixels are marked using the flags that come with each image. The glow from dust in the Solar System (zodiacal light) is subtracted.</li>
+      <li>A program compares the frames and marks sources that move in a straight line, stars whose position drifts by at least 2.5″ a year, and stars whose brightness changes compared with their neighbours. It gives each one a score. The score is a hint, not a verdict.</li>
     </ol>
-    <p class="muted">Tip: SPHEREx's detector arrays each see a different wavelength. Brightness can differ between arrays simply because the colour is different — compare frames from the same array (D1–D6 filter) when looking for variability.</p>
+    <h3>Limits</h3>
+    <p>One SPHEREx pixel covers 6.15″ of sky. In a year of data only the fastest nearby stars move by about one pixel. Very bright stars saturate the detector, and very faint objects are lost in the noise of a single image.</p>
+    <p>SPHEREx has six detector arrays, each covering a different infrared wavelength range. A star can look brighter in one array than another simply because of its colour, so to look for brightness changes, compare frames from the same array.</p>
   </div>
 </div>
-<div class="modal hidden" id="modal-about" role="dialog" aria-modal="true">
+<div class="modal hidden" id="modal-about" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+  <div class="modal-box prose">
+    <button class="modal-close" data-close aria-label="Close">×</button>
+    <h2 id="aboutTitle">About</h2>
+    <p>Made for the 2026 NASA Space Apps Challenge, challenge “Planet X and SPHEREx”, by team <span id="teamName">The K' Oirat</span> from Astana, Kazakhstan.</p>
+    <p>Images: SPHEREx Quick Release spectral images from the NASA/IPAC Infrared Science Archive (IRSA). If you use images from this tool, cite the SPHEREx data release DOIs listed by IRSA. Star catalogues: ESA Gaia DR3 and NASA AllWISE through CDS VizieR. Sky atlas: Aladin Lite by CDS, Strasbourg.</p>
+    <p>To link to a position, add <code>?ra=…&amp;dec=…</code> to the address, or use Share.</p>
+    <p class="muted">The change scores come from a simple algorithm and are not scientific classifications.</p>
+  </div>
+</div>
+<div class="modal hidden" id="modal-share" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
   <div class="modal-box">
-    <button class="modal-close" data-close>×</button>
-    <h2>About</h2>
-    <p>Built for the <b>2026 NASA Space Apps Challenge</b> — challenge <i>"Planet X and SPHEREx"</i> — by team <span id="teamName">K'Oirat</span> (Astana, Kazakhstan).</p>
-    <p>Data: SPHEREx Quick Release Level-2 spectral images from NASA/IPAC Infrared Science Archive (IRSA). Please cite the SPHEREx data release DOIs listed by IRSA when using images from this tool. Catalog overlays: ESA Gaia DR3 and NASA AllWISE via CDS VizieR. Sky atlas: Aladin Lite (CDS, Strasbourg).</p>
-    <p>Embed this tool: add <code>?ra=…&amp;dec=…</code> to the address, or use the <b>Share / embed</b> button.</p>
-    <p class="muted">Change scores are produced by a heuristic algorithm and are not scientific classifications.</p>
+    <button class="modal-close" data-close aria-label="Close">×</button>
+    <h2 id="shareTitle">Share this view</h2>
+    <label class="stack-lbl" for="shareLink">Link</label>
+    <div class="copyrow"><input id="shareLink" readonly><button class="btn primary" data-copy="shareLink">Copy link</button></div>
+    <label class="stack-lbl" for="embedCode">Code to embed in another website</label>
+    <div class="copyrow"><input id="embedCode" readonly><button class="btn primary" data-copy="embedCode">Copy code</button></div>
   </div>
 </div>
-<div class="modal hidden" id="modal-share" role="dialog" aria-modal="true">
-  <div class="modal-box">
-    <button class="modal-close" data-close>×</button>
-    <h2>Share or embed this view</h2>
-    <label class="lbl">Link</label>
-    <div class="copyrow"><input id="shareLink" readonly><button class="btn primary" data-copy="shareLink">Copy</button></div>
-    <label class="lbl">Embed in another website</label>
-    <div class="copyrow"><input id="embedCode" readonly><button class="btn primary" data-copy="embedCode">Copy</button></div>
-  </div>
-</div>
-<div class="modal hidden" id="modal-aladin" role="dialog" aria-modal="true">
+<div class="modal hidden" id="modal-aladin" role="dialog" aria-modal="true" aria-labelledby="aladinTitle">
   <div class="modal-box wide">
-    <button class="modal-close" data-close>×</button>
-    <h2>Sky atlas around the target <span class="muted small">2MASS images · Gaia DR3 & AllWISE catalogs · Aladin Lite (CDS)</span></h2>
+    <button class="modal-close" data-close aria-label="Close">×</button>
+    <h2 id="aladinTitle">Sky atlas around the target</h2>
+    <p class="hint">2MASS images with Gaia DR3 and AllWISE catalogues, from Aladin Lite (CDS).</p>
     <div id="aladinDiv" class="aladin"></div>
   </div>
 </div>
-<div class="toast hidden" id="toast"></div>
+<div class="toast hidden" id="toast" role="status"></div>
 
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>

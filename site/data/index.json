@@ -1,11 +1,11 @@
 {
- "generated": "2026-11-10T18:51:14+00:00",
+ "generated": "2026-11-13T13:49:23+00:00",
  "official_targets": [
   {
    "name": "Barnard's Star",
    "slug": "barnards-star",
    "kind": "fast-moving star",
-   "note": "largest proper motion of any star: 10.4″ per year, almost due north",
+   "note": "It moves across the sky faster than any other star, 10.4″ a year, almost due north",
    "ra": 269.446234,
    "dec": 4.768669
   },
@@ -13,7 +13,7 @@
    "name": "Epsilon Indi B",
    "slug": "epsilon-indi-b",
    "kind": "brown dwarf pair",
-   "note": "two brown dwarfs (unresolved by SPHEREx) sharing the 4.7″/yr motion of the star ε Indi A",
+   "note": "Two brown dwarfs, too close together for SPHEREx to separate. They move 4.7″ a year together with the star ε Indi A",
    "ra": 331.096664,
    "dec": -56.801239
   },
@@ -21,7 +21,7 @@
    "name": "WISE 0855−0714",
    "slug": "wise-0855-0714",
    "kind": "fast-moving brown dwarf",
-   "note": "challenge coordinates (08h55m10.831s −07d14m42.53s) are its 2010 WISE position; it moves 8.1″/yr westward, so by 2026 it is about 2′ away from them",
+   "note": "The coordinates in the challenge (08h55m10.831s −07d14m42.53s) are where WISE saw it in 2010. It moves 8.1″ a year to the west, so by 2026 it is about 2′ away from that spot",
    "ra": 133.759279,
    "dec": -7.2422
   },
@@ -29,7 +29,7 @@
    "name": "RW Aurigae",
    "slug": "rw-aurigae",
    "kind": "variable star (T Tauri)",
-   "note": "young variable star",
+   "note": "A young star whose brightness changes irregularly",
    "ra": 76.956068,
    "dec": 30.401326
   },
@@ -37,7 +37,7 @@
    "name": "R Draconis",
    "slug": "r-draconis",
    "kind": "variable star (Mira)",
-   "note": "Mira variable, period about 245 days; position approximate (±3″)",
+   "note": "A pulsating red giant that brightens and fades over about 245 days. Its position here is approximate, to about 3″",
    "ra": 248.1675,
    "dec": 66.755
   }

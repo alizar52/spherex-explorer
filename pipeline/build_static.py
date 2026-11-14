@@ -40,19 +40,19 @@ import spherex as sx  # noqa: E402
 OFFICIAL_TARGETS = [
     {"name": "Barnard's Star", "folder": "Barnards_Star", "kind": "fast-moving star",
      "ra": 269.452079, "dec": 4.693364, "epoch": 2000.0, "pmra": -801.6, "pmdec": 10362.4,
-     "note": "largest proper motion of any star: 10.4″ per year, almost due north"},
+     "note": "It moves across the sky faster than any other star, 10.4″ a year, almost due north"},
     {"name": "Epsilon Indi B", "folder": "Epsilon_Indi_B", "kind": "brown dwarf pair",
      "ra": 331.043833, "dec": -56.782694, "epoch": 1999.86, "pmra": 3961.4, "pmdec": -2538.3,
-     "note": "two brown dwarfs (unresolved by SPHEREx) sharing the 4.7″/yr motion of the star ε Indi A"},
+     "note": "Two brown dwarfs, too close together for SPHEREx to separate. They move 4.7″ a year together with the star ε Indi A"},
     {"name": "WISE 0855−0714", "folder": "WISE_0855", "kind": "fast-moving brown dwarf",
      "ra": 133.795129, "dec": -7.245147, "epoch": 2010.4, "pmra": -8123.0, "pmdec": 673.0,
-     "note": "challenge coordinates (08h55m10.831s −07d14m42.53s) are its 2010 WISE position; "
-             "it moves 8.1″/yr westward, so by 2026 it is about 2′ away from them"},
+     "note": "The coordinates in the challenge (08h55m10.831s −07d14m42.53s) are where WISE saw it in 2010. "
+             "It moves 8.1″ a year to the west, so by 2026 it is about 2′ away from that spot"},
     {"name": "RW Aurigae", "folder": "RW_Aur", "kind": "variable star (T Tauri)",
-     "ra": 76.956068, "dec": 30.401326, "epoch": 2000.0, "note": "young variable star"},
+     "ra": 76.956068, "dec": 30.401326, "epoch": 2000.0, "note": "A young star whose brightness changes irregularly"},
     {"name": "R Draconis", "folder": "R_Dra", "kind": "variable star (Mira)",
      "ra": 248.1675, "dec": 66.755, "epoch": 2000.0,
-     "note": "Mira variable, period about 245 days; position approximate (±3″)"},
+     "note": "A pulsating red giant that brightens and fades over about 245 days. Its position here is approximate, to about 3″"},
 ]
 CLASS_ORDER = {"challenge": 0, "moving": 1, "variable": 2, "stable": 3}
 
@@ -147,8 +147,8 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
         notes, target, off_arcsec = [], None, None
         c = (n - 1) / 2
         if tracked:
-            notes.append("Each frame is centred on the asteroid's predicted (ephemeris) position for that date, "
-                         "so the asteroid stays in the middle while the background changes.")
+            notes.append("Each frame is centred on where the asteroid was predicted to be on that date, "
+                         "so the asteroid stays in the middle and the background stars change.")
         else:
             b = brightest_source(frames)
             if b and b[2] > 30:
@@ -157,17 +157,17 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
                 if off_px > 1.5:
                     ra_t, dec_t = sx.target_wcs(ra0, dec0, n).all_pix2world([[b[0], b[1]]], 0)[0]
                     target = {"name": shown, "ra": float(ra_t), "dec": float(dec_t)}
-                    notes.append(f"The bright source is {off_arcsec}″ ({off_px:.1f} px) from the catalogue position the "
-                                 f"cutouts were centred on — most likely the star's own proper motion since the "
-                                 f"catalogue epoch. Measurements follow the source, not the catalogue position.")
+                    notes.append(f"The star sits {off_arcsec}″ ({off_px:.1f} pixels) away from the centre of these images. "
+                                 f"The images were centred on its catalogue position from years ago, and the star has "
+                                 f"moved since then. Measurements here follow the star, not the old position.")
             else:
-                notes.append("No clear source inside these small cutouts at the catalogue position (the star may have "
-                             "moved out of the 12-pixel cutout by proper motion, or it is saturated).")
+                notes.append("There is no clear star in these small images. It has either moved out of the 12-pixel "
+                             "square since its catalogue position was measured, or it is so bright that its centre is saturated.")
         if n < 24:
-            notes.append(f"Small cutouts ({n}×{n} px = {n * sx.PIXSCALE_ARCSEC / 60:.1f}′): too small for the automatic "
-                         f"search for moving objects; only the brightness of the central source is checked.")
+            notes.append(f"These images are only {n}×{n} pixels ({n * sx.PIXSCALE_ARCSEC / 60:.1f}′ across), too small to "
+                         f"search for moving objects. Only the brightness of the central object is checked.")
         if rs[0].get("label_status") and not demo:
-            notes.append(f"Dataset class label “{cls}” is provisional (not scientifically validated).")
+            notes.append(f"The team dataset labels this object “{cls}”. The label has not been checked scientifically.")
         if demo:
             notes.append("SYNTHETIC DEMO DATA — generated to test the interface, not real SPHEREx images.")
         payload = sx.build_payload(frames, ra0, dec0, n, name=shown, notes=notes, tracked=tracked,
@@ -183,8 +183,8 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
                 "id": "C001", "kind": "moving", "x": c, "y": c, "ra": ra0, "dec": dec0, "name": shown,
                 "frames": [f.id for f in frames], "track": [{"frame": f.id, "x": c, "y": c} for f in frames],
                 "snr": None, "confidence": None,
-                "note": "Known asteroid: its position comes from the ephemeris used to centre the frames, "
-                        "it was not measured from the images."}]
+                "note": "A known asteroid. Its position comes from its predicted orbit, which was used to centre the "
+                        "frames. It was not measured from the images."}]
         slug = slugify(name)
         (out / "targets" / f"{slug}.json").write_text(json.dumps(payload, separators=(",", ":")))
         entries.append({"slug": slug, "name": shown, "class": cls, "ra": ra0, "dec": dec0, "size": n,
@@ -202,20 +202,20 @@ def build_dataset(metadata: Path, fits_root: Path, out: Path, size: int | None =
 def describe_target(t: dict, payload: dict) -> None:
     """Add plain-language notes and a catalogue-guided entry for the named target."""
     notes = payload["notes"]
-    notes.insert(0, f"{t['name']} — {t['kind']}: {t['note']}.")
+    notes.insert(0, f"{t['note']}.")
     s = payload.get("target_summary")
     tt = payload["target_track"]
     shift = math.hypot(tt[-1]["x"] - tt[0]["x"], tt[-1]["y"] - tt[0]["y"]) if len(tt) > 1 else 0.0
     if t.get("pmra") is not None:
         pm = math.hypot(t["pmra"], t["pmdec"]) / 1000
-        notes.append(f"Crosshair = position predicted for each date from the catalogue proper motion ({pm:.1f}″/yr); "
-                     f"predicted shift across these frames: {shift:.1f} px ({shift * sx.PIXSCALE_ARCSEC:.1f}″).")
+        notes.append(f"The crosshair shows where the star catalogue says the object should be on each date, given its motion "
+                     f"of {pm:.1f}″ a year. Across these frames that is a shift of {shift:.1f} pixels ({shift * sx.PIXSCALE_ARCSEC:.1f}″).")
     found = next((d for d in payload["detections"] if d.get("name") == t["name"]), None)
     if found and found["kind"] == "shifted":
         found["catalog_motion_arcsec_per_year"] = round(math.hypot(t.get("pmra", 0), t.get("pmdec", 0)) / 1000, 2)
-        found["note"] = (f"{t['name']}: measured drift {found['motion_arcsec_per_year']}″/yr from these images "
-                         f"(catalogue proper motion {found['catalog_motion_arcsec_per_year']}″/yr; the measured value "
-                         f"also contains parallax and centroid error).")
+        found["note"] = (f"Measured from these images, {t['name']} drifts {found['motion_arcsec_per_year']}″ a year. "
+                         f"The star catalogue gives {found['catalog_motion_arcsec_per_year']}″ a year. The two differ because "
+                         f"the measurement also picks up parallax (Earth's own orbit) and some error in finding the star's centre.")
     elif not found and s and t.get("pmra") is not None:
         c0 = tt[len(tt) // 2]
         z = s.get("snr_vs_empty_sky")
@@ -224,14 +224,14 @@ def describe_target(t: dict, payload: dict) -> None:
             "x": c0["x"], "y": c0["y"], "frames": [p["frame"] for p in tt],
             "track": [{"frame": p["frame"], "x": p["x"], "y": p["y"]} for p in tt],
             "snr": z, "confidence": None, "speed_arcsec_per_day": None,
-            "note": (f"Not found by the automatic search (too faint in single images). Forced measurement at the "
-                     f"catalogue-predicted position: {s['mean_flux_mjy']} mJy averaged over {s['frames_used']} frames"
-                     + (f", {z}× the scatter of the same measurement at {s['random_positions']} random places of this field"
+            "note": (f"Too faint for the automatic search to find in single images. Measuring exactly where the catalogue "
+                     f"says it should be gives {s['mean_flux_mjy']} mJy on average over {s['frames_used']} frames"
+                     + (f", {z} times the spread of the same measurement at {s['random_positions']} random spots in this field"
                         if z is not None else "")
-                     + (f"; {s['fraction_random_brighter'] * 100:.0f}% of those random places are at least as bright"
+                     + (f". {s['fraction_random_brighter'] * 100:.0f}% of those random spots are at least as bright"
                         if s.get("fraction_random_brighter") is not None else "")
-                     + f". The predicted shift over these frames is only {shift:.1f} px, so the images alone do not "
-                       f"prove that this faint source is the moving object.")})
+                     + f". It should only shift {shift:.1f} pixels across these frames, so the images alone cannot "
+                       f"show that this faint smudge is the moving brown dwarf.")})
 
 
 def build_challenge(folder: Path, out: Path, size: int | None = None) -> list[dict]:

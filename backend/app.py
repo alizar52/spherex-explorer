@@ -1,4 +1,7 @@
-"""Live search server.
+"""
+hint from agent:
+
+live search server.
 
 GET /api/frames?ra=&dec=&fov=&detector=&max_frames=   frames for any position, from IRSA
 GET /api/resolve?name=                                 object name to coordinates (CDS Sesame)
@@ -50,23 +53,51 @@ def _classify_cutout(payload):
         logging.exception("Could not load the classification model")
         raise HTTPException(503, "The classification model is unavailable.") from None
     try:
-        return classifier.predict([payload])
+        content = payload.getvalue()
+        result = classifier.predict([io.BytesIO(content)])
+    
+        import numpy as np
+        from astropy.io import fits
+
+        with fits.open(io.BytesIO(content), memmap=False) as hdus:
+            image = np.asarray(hdus['IMAGE'].data, dtype=np.float64)
+        valid = np.isfinite(image)
+        low, high = np.percentile(image[valid], [1, 99.5])
+        display = np.zeros(image.shape)
+        
+        
+        
+        
+        
+        
+        if high > low:
+            display[valid] = np.arcsinh(10 * np.clip(
+                (image[valid] - low) / (high - low), 0, 1)) / np.arcsinh(10)
+        result['preview'] = {
+            'width': image.shape[1], 'height': image.shape[0],
+            'pixels': np.rint(display * 255).astype(np.uint8).ravel().tolist(),
+        }
+        return result
     except (ValueError, KeyError, OSError, TypeError, IndexError):
-        raise HTTPException(422, "Use a readable SPHEREx FITS cutout with a 2D IMAGE extension, up to 84×84 pixels.") from None
+        raise HTTPException(422, "Use a readable SPHEREx FITS cutout with a 2D IMAGE extension, up to 84×84 pixels") from None
 
 
 @app.post("/api/classify")
 async def classify(request: Request):
-    """Classify a single FITS cutout sent as the raw request body."""
+
     with io.BytesIO() as payload:
         async for chunk in request.stream():
             if payload.tell() + len(chunk) > MAX_FITS_BYTES:
-                raise HTTPException(413, "The FITS file must be 16 MiB or smaller.")
+                raise HTTPException(413, "The FITS file must be 16 MB or smaller")
             payload.write(chunk)
         if not payload.tell():
             raise HTTPException(400, "Select a FITS file.")
+        
+        
         if payload.getbuffer()[:9] != b"SIMPLE  =":
-            raise HTTPException(422, "Please upload an uncompressed FITS file.")
+            raise HTTPException(422, "Please upload an uncompressed FITS file")
+        
+        
         payload.seek(0)
         return await run_in_threadpool(_classify_cutout, payload)
 
@@ -92,9 +123,9 @@ def frames(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90,
     try:
         data = _frames_cached(*key)
     except Exception as e:
-        raise HTTPException(502, f"IRSA request failed: {type(e).__name__}: {e}")
+        raise HTTPException(502, f"IRSA request HAS failed, NOOB: {type(e).__name__}: {e}")
     if not data["frames"]:
-        raise HTTPException(404, "No SPHEREx images cover this position yet (or IRSA returned none).")
+        raise HTTPException(404, "No SPHEREx images cover this position yet (or IRSA returned none)")
     return JSONResponse(data, headers={"Cache-Control": "public, max-age=3600"})
 
 

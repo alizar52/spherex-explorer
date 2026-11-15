@@ -827,9 +827,38 @@ function defaultDetector(frames) {
   return best;
 }
 
+let cnnPredictions;
+let cnnRequest = 0;
+async function showCNNPrediction(slug) {
+  const request = ++cnnRequest;
+  const panel = $('cnnPrediction');
+  panel.hidden = true;
+  panel.classList.add('hidden');
+  if (!slug) return;
+
+  try {
+    cnnPredictions ??= fetchJSON('data/cnn-predictions.json', {}, 10000);
+    const predictions = await cnnPredictions;
+    if (request !== cnnRequest || !S.data || S.query?.slug !== slug) return;
+    const prediction = predictions[slug];
+    if (!prediction) return;
+
+    const scores = Object.entries(prediction.scores)
+      .map(([category, score]) => `${category} ${Math.round(score * 100)}%`).join(' · ');
+    const splitLabel = {train: 'training', validation: 'validation', test: 'test'}[prediction.split];
+    $('cnnResult').textContent = `${prediction.category} · ${prediction.observations} FITS observations`;
+    $('cnnDetails').textContent = `Model scores: ${scores}. Precomputed from catalog cutouts. This target was in the model’s ${splitLabel} split.`;
+    panel.hidden = false;
+    panel.classList.remove('hidden');
+  } catch {
+    cnnPredictions = undefined;
+  }
+}
+
 function onData(data, opts = {}) {
   play(false);
   S.data = data; S.frames = data.frames.slice().sort((a, b) => a.mjd - b.mjd); S.sel = null; S.pick = null;
+  showCNNPrediction(S.query?.slug);
   S.catalogs = {gaia: null, allwise: null}; S.zoom = 1; S.panX = S.panY = 0;
   if (opts.det === 0 || S.frames.some((f) => f.detector === opts.det)) S.det = opts.det;
   else S.det = defaultDetector(S.frames);
@@ -862,6 +891,7 @@ async function goCoords(ra, dec, name, opts = {}) {
     dc: o.center_ra != null ? angDist(o.center_ra, o.center_dec, ra, dec) : Infinity}))
     .filter((q) => q.d < 30 || (q.o.size >= 24 && q.dc < 0.4 * q.o.size * PIX_ARCSEC)).sort((a, b) => a.d - b.d).map((q) => q.o)[0];
   if (hit && !opts.forceLive) return loadStatic(hit.slug, opts);
+  showCNNPrediction(null);
   if (!S.apiOk) {
     S.data = null; S.frames = S.view = []; draw();
     $('stageMsg').innerHTML = `There are no prepared images at ${hms(ra)} ${dms(dec)}.<br><br>Searching any position needs the live search server, and it is not running on this copy of the site. Pick an object from the list, or start the server as described in the README.`; markCurrentObject();

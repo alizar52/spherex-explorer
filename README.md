@@ -6,16 +6,17 @@ NASA Space Apps Challenge 2026, challenge "Planet X and SPHEREx". Team The K' Oi
 
 Live site: https://alizar52.github.io/spherex-explorer/
 
-## The problem
+The GitHub Repo containing code for FITS files extraction: https://github.com/arsantsoy-sudo/ASPAN_EON-Data-Collector
 
-NASA's SPHEREx telescope photographs the whole sky in 102 infrared colours every six months. Asteroids, comets, nearby stars and brown dwarfs show themselves by shifting between photographs, and variable stars by changing brightness. 
+The GitHub Repo containing Machine-Learning and similar, code used in this project: https://github.com/ghastgasmask/aspan-eon-spherex-ml-cnn
 
-There are more than a billion objects in the images, too many for scientists to check alone, and the raw files are hard to use for anyone outside astronomy
+As of now, the ASPAN EON uses a Render server on a free plan. 
 
-## What the tool does
+## problem
+NASA's SPHEREx telescope photographs the whole sky in 102 infrared colours every six months. Asteroids, comets, nearby stars and brown dwarfs show themselves by shifting between photographs, and variable stars by changing brightness. There are more than a billion objects in the images, too many for scientists to check alone, and the raw files are hard to use for anyone outside astronomy
 
-Type a position on the sky (right ascension and declination) or pick an object. The tool finds every SPHEREx image of that spot, lines the images up with north at the top, and plays them in date order. 
-Things that move or change stand out to the eye, and an algorithm marks them as well.
+## tool function
+Type a position on the sky (right ascension and declination) or pick an object. The tool finds every SPHEREx image of that spot, lines the images up with north at the top, and plays them in the exact date order.. Things that move or change stand out to the eye, and an algorithm marks them as well.
 
 - Time-lapse, blink, side by side, swipe, difference (A minus B) and stack (average, brightest pixel, frame minus average)
 - A strip of thumbnails under the image: every photo with its date, detector array and wavelength
@@ -24,22 +25,22 @@ Things that move or change stand out to the eye, and an algorithm marks them as 
 - Click any star to get its spectrum and light curve, measured in the browser from all frames
 - Colour picture: all frames of arrays D1–D2, D3–D4 and D5–D6 averaged and shown as blue, green and red
 - Gaia DR3 and AllWISE overlays also work on GitHub Pages (loaded straight from CDS VizieR)
-- Changes found: moving objects, shifted positions (proper motion), brightness changes, single-frame spots, each with a score and plain-language explanation
-- Field of view from 3.3′ to 13.1′, quality flags shown on the image, Gaia DR3 and AllWISE overlays, Aladin sky atlas
-- Links with coordinates (`?ra=…&dec=…`, `?obj=…`) and embed code
+- Changes found: moving objects, shifted positions, brightness changes, single-frame spots, with a score and plain-language explanation
+- Field of view from 3.3′ to 13.1′, quality flags shown on the image, Gaia DR3 and AllWISE overlays, Aladin sky atlas (not fully implemented)
+- Links with coordinates (`?ra=…&dec=…`, `?obj=…`) and embed code (not fully implemented)
 - Guided stories and a tour of the controls for first-time visitors; hover any control for an explanation
 
-## Results 
+## results 
 
 Real SPHEREx images, 24 frames per target, Apr 2025 to Oct 2026, all six detector arrays (0.75–5 µm), 82×82 px cutouts
 
 | Target | Result |
 |---|---|
-| Barnard's Star | Found automatically as a shifted position: 10.27″ a year from 19 of 24 frames (catalogue 10.39″). The core is saturated, so brightness is not reliable. |
-| Epsilon Indi B | Found automatically as a shifted position: 4.41″ a year from 22 frames (catalogue 4.7″; the measurement also contains parallax). |
+| Barnard's Star | Found automatically as a shifted position: 10.27″ a year from 19 of 24 frames (catalogue 10.39″). The core is saturated, so brightness is not reliable |
+| Epsilon Indi B | Found automatically as a shifted position: 4.41″ a year from 22 frames (catalogue 4.7″; the measurement also contains parallax ) |
 | WISE 0855−0714 | Too faint for the automatic search. Forced measurement at the predicted position in D5–D6 (3.8–5 µm), where it emits: 0.54 ± 0.05 mJy, 6.1 times the empty-sky scatter; 3 % of random positions are as bright. Spitzer measured about 0.5 mJy at 4.5 µm. At shorter wavelengths the same spot holds a background star. The challenge coordinates are its 2010 position; by 2026 it is about 2′ west of them. |
-| RW Aurigae | Saturated at the centre, no reliable light curve. |
-| R Draconis | Saturated at the centre, no reliable light curve. |
+| RW Aurigae | Saturated at the centre, no reliable light curve |
+| R Draconis | Saturated at the centre, so no reliable light curve |
 
 The other 90 objects come from the team dataset: 30 asteroids, 30 variable stars and 30 reference stars, 8 to 24 frames each (2,135 frames in total with the challenge targets). The automatic search finds all 30 asteroids and no false changes in the 60 star fields
 
@@ -47,7 +48,8 @@ The other 90 objects come from the team dataset: 30 asteroids, 30 variable stars
 
 ![Architecture](docs/architecture.svg)
 
-The data is the core and the website is the outer layer. Every part talks to the next through one JSON format, so each can be replaced on its own:
+The data is the core and the website is the outer layer. 
+Every part talks to the next through 1 JSON format, so each can be replaced on its own:
 
 1. **Find images**: IRSA TAP query on `spherex.plane` and `spherex.artifact` for every spectral image containing the position.
 2. **Cut out**: IRSA cutout service, so only a small square is downloaded.
@@ -92,7 +94,7 @@ Open http://localhost:8000. With the server running, any position on the sky can
 
 ## Deploy
 
-The website is published from `site/` to GitHub Pages by `.github/workflows/pages.yml` on every push to `main`. On GitHub Pages only prepared objects can be shown. For live search, run `backend/app.py` on any Python or Docker host and put its address in `site/js/config.js`.
+The website is published from `site/` to GitHub Pages by `.github/workflows/pages.yml` on every push to `main`. On GitHub Pages only prepared objects can be shown. For live search, run `backend/app.py` on any Python or Docker host and put its address in `site/js/config.js`
 
 ## Data format
 

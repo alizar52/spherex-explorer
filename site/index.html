@@ -216,6 +216,12 @@
           <button class="btn small" type="submit">Classify</button>
         </form>
         <p id="fitsStatus" role="status"></p>
+        <figure id="fitsPreview" hidden style="margin: 12px 0">
+          <canvas id="fitsCanvas" role="img" aria-label="Uploaded FITS image" style="width:100%;max-width:320px;image-rendering:pixelated;background:#000"></canvas>
+          <figcaption id="fitsCaption"></figcaption>
+          <p class="hint">Single uploaded frame · grayscale, asinh stretch. Display brightness does not change the prediction.</p>
+          <button id="fitsEnlarge" class="btn small" type="button">Enlarge image</button>
+        </figure>
       </details>
       <div id="cnnPrediction" class="inspector hidden" hidden aria-live="polite">
         <h3>Experimental CNN classification</h3>
@@ -303,6 +309,6 @@
 <script src="js/config.js?v=20261115-upload"></script>
 <script src="js/app.js?v=20261114-cnn"></script>
 <script src="js/guide.js?v=20261114-aspan-eon"></script>
-<script src="js/fits-upload.js"></script>
+<script src="js/fits-upload.js?v=20261115-preview"></script>
 </body>
 </html>

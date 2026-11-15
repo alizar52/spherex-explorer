@@ -8,11 +8,14 @@ Live site: https://alizar52.github.io/spherex-explorer/
 
 ## The problem
 
-NASA's SPHEREx telescope photographs the whole sky in 102 infrared colours every six months. Asteroids, comets, nearby stars and brown dwarfs show themselves by shifting between photographs, and variable stars by changing brightness. There are more than a billion objects in the images, too many for scientists to check alone, and the raw files are hard to use for anyone outside astronomy.
+NASA's SPHEREx telescope photographs the whole sky in 102 infrared colours every six months. Asteroids, comets, nearby stars and brown dwarfs show themselves by shifting between photographs, and variable stars by changing brightness. 
+
+There are more than a billion objects in the images, too many for scientists to check alone, and the raw files are hard to use for anyone outside astronomy
 
 ## What the tool does
 
-Type a position on the sky (right ascension and declination) or pick an object. The tool finds every SPHEREx image of that spot, lines the images up with north at the top, and plays them in date order like a flip-book. Things that move or change stand out to the eye, and an algorithm marks them as well.
+Type a position on the sky (right ascension and declination) or pick an object. The tool finds every SPHEREx image of that spot, lines the images up with north at the top, and plays them in date order. 
+Things that move or change stand out to the eye, and an algorithm marks them as well.
 
 - Time-lapse, blink, side by side, swipe, difference (A minus B) and stack (average, brightest pixel, frame minus average)
 - A strip of thumbnails under the image: every photo with its date, detector array and wavelength
@@ -26,9 +29,9 @@ Type a position on the sky (right ascension and declination) or pick an object. 
 - Links with coordinates (`?ra=…&dec=…`, `?obj=…`) and embed code
 - Guided stories and a tour of the controls for first-time visitors; hover any control for an explanation
 
-## Results on the challenge test targets
+## Results 
 
-Real SPHEREx images, 24 frames per target, Apr 2025 to Oct 2026, all six detector arrays (0.75–5 µm), 82×82 px cutouts.
+Real SPHEREx images, 24 frames per target, Apr 2025 to Oct 2026, all six detector arrays (0.75–5 µm), 82×82 px cutouts
 
 | Target | Result |
 |---|---|
@@ -38,7 +41,7 @@ Real SPHEREx images, 24 frames per target, Apr 2025 to Oct 2026, all six detecto
 | RW Aurigae | Saturated at the centre, no reliable light curve. |
 | R Draconis | Saturated at the centre, no reliable light curve. |
 
-The other 90 objects come from the team dataset: 30 asteroids, 30 variable stars and 30 reference stars, 8 to 24 frames each (2,135 frames in total with the challenge targets). The automatic search finds all 30 asteroids and no false changes in the 60 star fields.
+The other 90 objects come from the team dataset: 30 asteroids, 30 variable stars and 30 reference stars, 8 to 24 frames each (2,135 frames in total with the challenge targets). The automatic search finds all 30 asteroids and no false changes in the 60 star fields
 
 ## How it is built
 
@@ -58,7 +61,7 @@ The data is the core and the website is the outer layer. Every part talks to the
    - transient: a strong source in one exposure only, seen by both focal planes (arrays D1–D3 and D4–D6 photograph the same sky at the same moment, a cosmic-ray hit lands on one only)
    - for a named target with known proper motion: forced photometry at the predicted positions, compared with about 400 random positions
 
-New SPHEREx releases need only a rerun of the pipeline. A machine-learning model can add its results by writing the same `detections` list. Another front end can read the same JSON files.
+New SPHEREx releases need only a rerun of the pipeline. A machine-learning model can add its results by writing the same `detections` list. Another front end can read the same JSON files
 
 ## Project layout
 
@@ -89,7 +92,7 @@ Open http://localhost:8000. With the server running, any position on the sky can
 
 ## Deploy
 
-The website is published from `site/` to GitHub Pages by `.github/workflows/pages.yml` on every push to `main` (Settings, Pages, Source: GitHub Actions). On GitHub Pages only prepared objects can be shown. For live search, run `backend/app.py` on any Python or Docker host and put its address in `site/js/config.js`.
+The website is published from `site/` to GitHub Pages by `.github/workflows/pages.yml` on every push to `main`. On GitHub Pages only prepared objects can be shown. For live search, run `backend/app.py` on any Python or Docker host and put its address in `site/js/config.js`.
 
 ## Data format
 

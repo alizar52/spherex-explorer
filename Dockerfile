@@ -2,6 +2,7 @@ FROM python:3.11-slim
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
+RUN pip install --no-cache-dir "torch==2.11.0" --index-url https://download.pytorch.org/whl/cpu
 COPY pipeline pipeline
 COPY backend backend
 COPY site site

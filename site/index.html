@@ -207,6 +207,21 @@
     <div class="res-col">
       <h2>Selected change</h2>
       <div id="inspector" class="inspector"></div>
+      <details>
+        <summary>Classify a FITS upload</summary>
+        <p class="hint">Use one SPHEREx FITS cutout with a 2D IMAGE extension (up to 84×84 pixels and 16 MiB). Experimental classification.</p>
+        <form id="fitsUpload">
+          <label for="fitsFile">FITS cutout</label>
+          <input id="fitsFile" type="file" accept=".fits,.fit,.fts" required>
+          <button class="btn small" type="submit">Classify</button>
+        </form>
+        <p id="fitsStatus" role="status"></p>
+      </details>
+      <div id="cnnPrediction" class="inspector hidden" hidden aria-live="polite">
+        <h3>Experimental CNN classification</h3>
+        <p id="cnnResult"></p>
+        <p id="cnnDetails" class="hint"></p>
+      </div>
     </div>
     <div class="res-col charts">
       <h2 id="lcTitle">Target brightness over time</h2>
@@ -285,8 +300,9 @@
 </div>
 <div class="toast hidden" id="toast" role="status"></div>
 
-<script src="js/config.js?v=20261114-aspan-eon"></script>
-<script src="js/app.js?v=20261114-aspan-eon"></script>
+<script src="js/config.js?v=20261115-upload"></script>
+<script src="js/app.js?v=20261114-cnn"></script>
 <script src="js/guide.js?v=20261114-aspan-eon"></script>
+<script src="js/fits-upload.js"></script>
 </body>
 </html>

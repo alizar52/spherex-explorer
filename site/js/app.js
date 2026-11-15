@@ -386,7 +386,7 @@ function draw() {
 }
 
 function rgbComposite(n) {
-  // every frame of a pair of arrays is averaged first (more signal, less noise), then each pair becomes one colour
+  
   const key = `_rgb_${$('repairChk').checked ? 1 : 0}${$('stretchSelect').value}${$('clipSelect').value}`;
   if (S.data[key]) return S.data[key];
   const groups = [[5, 6], [3, 4], [1, 2]]; const ch = [];
@@ -588,7 +588,11 @@ function clickSelect(e) {
   S.pick = {x: Math.round(q.x * 10) / 10, y: Math.round(q.y * 10) / 10}; drawCharts(); draw();
 }
 function measureAt(fr, x, y) {
-  // same 2-pixel aperture and 5-9 pixel sky ring as the pipeline (spherex.aperture_flux)
+
+
+
+
+  
   const n = S.data.size; const img = frameArr(fr, 'img'), z = frameArr(fr, 'zodi'), bad = frameArr(fr, 'bad'), nz = frameArr(fr, 'noise');
   let s = 0, cnt = 0, v = 0, flagged = false; const ring = [];
   for (let j = Math.max(0, Math.floor(y - 9)); j <= Math.min(n - 1, Math.ceil(y + 9)); j++)

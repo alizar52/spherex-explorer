@@ -29,7 +29,6 @@
     const frame = context.createImageData(image.width, image.height);
     for (let y = 0; y < image.height; y++) {
       for (let x = 0; x < image.width; x++) {
-        // FITS row zero is shown at the bottom, as in astronomical image viewers.
         const value = image.pixels[y * image.width + x];
         const index = ((image.height - 1 - y) * image.width + x) * 4;
         frame.data.set([value, value, value, 255], index);

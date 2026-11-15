@@ -10,13 +10,16 @@ Run: uvicorn backend.app:app --port 8000
 from __future__ import annotations
 
 import os
+import io
+import logging
 import re
 import sys
 import time
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,7 +29,46 @@ sys.path.insert(0, str(ROOT / "pipeline"))
 import spherex as sx
 
 app = FastAPI(title="ASPAN EON API", version="1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
+
+MAX_FITS_BYTES = 16 * 1024 * 1024
+
+
+@lru_cache(maxsize=1)
+def _classifier():
+    import torch
+    from backend.predict import FitsClassifier
+
+    torch.set_num_threads(1)
+    return FitsClassifier(ROOT / "backend" / "best_cnn.pt")
+
+
+def _classify_cutout(payload):
+    try:
+        classifier = _classifier()
+    except Exception:
+        logging.exception("Could not load the classification model")
+        raise HTTPException(503, "The classification model is unavailable.") from None
+    try:
+        return classifier.predict([payload])
+    except (ValueError, KeyError, OSError, TypeError, IndexError):
+        raise HTTPException(422, "Use a readable SPHEREx FITS cutout with a 2D IMAGE extension, up to 84×84 pixels.") from None
+
+
+@app.post("/api/classify")
+async def classify(request: Request):
+    """Classify a single FITS cutout sent as the raw request body."""
+    with io.BytesIO() as payload:
+        async for chunk in request.stream():
+            if payload.tell() + len(chunk) > MAX_FITS_BYTES:
+                raise HTTPException(413, "The FITS file must be 16 MiB or smaller.")
+            payload.write(chunk)
+        if not payload.tell():
+            raise HTTPException(400, "Select a FITS file.")
+        if payload.getbuffer()[:9] != b"SIMPLE  =":
+            raise HTTPException(422, "Please upload an uncompressed FITS file.")
+        payload.seek(0)
+        return await run_in_threadpool(_classify_cutout, payload)
 
 
 @lru_cache(maxsize=64)
